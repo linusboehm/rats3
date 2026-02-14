@@ -1,0 +1,70 @@
+[package]
+name = "rats3"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# TUI
+ratatui = "0.27"
+crossterm = "0.27"
+
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+futures = "0.3"
+
+# AWS S3 (optional for now due to Rust version requirements)
+aws-config = { version = "1.1", optional = true }
+aws-sdk-s3 = { version = "1.30", optional = true }
+
+# Fuzzy matching
+nucleo = "0.5"
+nucleo-matcher = "0.3"
+
+# Syntax highlighting
+syntect = "5.2"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Clipboard
+arboard = "3.3"
+base64 = "0.21"
+
+# CLI parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async trait
+async-trait = "0.1"
+
+# Directories
+dirs = "5.0"
+
+# Lazy static
+lazy_static = "1.4"
+
+# Time/Date
+chrono = { version = "=0.4.38", default-features = false, features = ["clock", "std"] }
+
+# MIME type detection
+mime_guess = "2.0"
+
+[dev-dependencies]
+tempfile = "3.13"
+
+[features]
+default = []
+s3 = ["aws-config", "aws-sdk-s3"]
+
+[[bin]]
+name = "rats3"
+path = "src/main.rs"
+
+[lib]
+name = "rats3"
+path = "src/lib.rs"

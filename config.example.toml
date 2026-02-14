@@ -1,0 +1,141 @@
+# rats3 Configuration File
+# Place this at ~/.config/rats3/config.toml
+
+# Maximum file size for preview (in bytes)
+# Default: 102400 (100KB)
+preview_max_size = 102400
+
+# Default preview window width percentage (20-80)
+# Default: 50 (equal split between explorer and preview)
+preview_width_percent = 50
+
+# Status message timeout in seconds
+# Default: 5 seconds
+status_message_timeout_secs = 5
+
+# Download destinations
+# These will be available in download mode (press S)
+[[download_destinations]]
+name = "Temp"
+path = "/tmp"
+
+[[download_destinations]]
+name = "Desktop"
+path = "~/test/s3"
+
+[[download_destinations]]
+name = "nvme"
+path = "/nvme/tmp/lboehm"
+
+# Key Bindings
+# You can customize all key bindings here
+# Format: ["Key1", "Key2", ...] - multiple keys can trigger the same action
+# Modifiers: Ctrl-, Alt-, Shift- (e.g., "Ctrl-c", "Alt-x", "Shift-Tab")
+# Special keys: Enter, Tab, Backspace, Escape/Esc, Space, Up, Down, Left, Right,
+#               Home, End, PageUp, PageDown, Delete/Del, Insert/Ins
+# Single characters: "a", "b", "k", "j", etc.
+
+[key_bindings]
+# Quit the application
+quit = ["Ctrl-c", "Ctrl-q"]
+
+# Move selection up
+move_up = ["Up", "K"]
+
+# Move selection down
+move_down = ["Down", "J"]
+
+# Jump up by 10 items
+jump_up = ["Ctrl-u"]
+
+# Jump down by 10 items
+jump_down = ["Ctrl-d"]
+
+# Jump to bottom
+jump_to_bottom = ["G", "End"]
+
+# Jump to top (two-key sequence, vim-style)
+jump_to_top = "gg"
+
+# Navigate into directory (open)
+navigate_into = ["Enter", "Right", "L"]
+
+# Navigate to parent directory (go back)
+navigate_up = ["Left", "H"]
+
+# Enter download mode
+download_mode = ["S"]
+
+# Enter history mode
+history_mode = ["R"]
+
+# Copy current path to clipboard
+copy_path = ["Y"]
+
+# Focus preview window
+focus_preview = ["Ctrl-l"]
+
+# Focus explorer window
+focus_explorer = ["Ctrl-h"]
+
+# Toggle focus between explorer and preview
+toggle_focus = ["Tab"]
+
+# Enter visual mode in preview (vim-style line selection)
+preview_visual_mode = ["v"]
+
+# Yank/copy selection in visual mode
+yank_selection = ["y"]
+
+# Examples of alternative configurations:
+
+# Emacs-style navigation:
+# move_up = ["Ctrl-p"]
+# move_down = ["Ctrl-n"]
+# navigate_up = ["Ctrl-b"]
+# navigate_into = ["Ctrl-f"]
+
+# Arrow keys only:
+# move_up = ["Up"]
+# move_down = ["Down"]
+# navigate_up = ["Left"]
+# navigate_into = ["Right", "Enter"]
+
+# Custom single key for quit (not recommended):
+# quit = ["q"]
+
+# Color Scheme
+# Tokyo Night theme by default
+# All colors are in RGB format { r = 0-255, g = 0-255, b = 0-255 }
+[colors]
+# Background color
+background = { r = 26, g = 27, b = 38 }  # #1a1b26 - dark background
+
+# Border color for widgets
+border = { r = 86, g = 95, b = 137 }  # #565f89 - muted blue-gray
+
+# Accent color for normal mode (prompt, highlights)
+accent_normal = { r = 125, g = 207, b = 255 }  # #7dcfff - bright cyan
+
+# Accent color for search mode
+accent_search = { r = 224, g = 175, b = 104 }  # #e0af68 - warm yellow
+
+# Primary text color
+text_primary = { r = 192, g = 202, b = 245 }  # #c0caf5 - light blue-gray
+
+# Secondary/dimmed text color
+text_secondary = { r = 86, g = 95, b = 137 }  # #565f89 - muted blue-gray
+
+# Error text color
+text_error = { r = 247, g = 118, b = 142 }  # #f7768e - pink-red
+
+# Selection background color
+selection_bg = { r = 41, g = 46, b = 66 }  # #292e42 - slightly lighter than background
+
+# File icon colors
+file_icon_dir = { r = 125, g = 207, b = 255 }  # #7dcfff - bright cyan
+file_icon_rust = { r = 224, g = 175, b = 104 }  # #e0af68 - warm yellow
+file_icon_config = { r = 255, g = 158, b = 100 }  # #ff9e64 - orange
+file_icon_doc = { r = 192, g = 202, b = 245 }  # #c0caf5 - light blue-gray
+file_icon_script = { r = 158, g = 206, b = 106 }  # #9ece6a - green
+file_icon_default = { r = 192, g = 202, b = 245 }  # #c0caf5 - light blue-gray
