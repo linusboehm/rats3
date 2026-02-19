@@ -143,9 +143,9 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     // Save state before exiting (even if there was an error)
-    if let Ok(app) = &app_result {
+    if let Ok((app, final_backend)) = &app_result {
         let mut state = AppState::load().unwrap_or_default();
-        state.set_last_location(app.current_prefix().to_string());
+        state.set_last_location(final_backend.get_display_path(app.current_prefix()));
         state.set_history(app.history().to_vec());
         let _ = state.save();
     }
@@ -175,13 +175,30 @@ fn should_add_to_history(path: &str) -> bool {
     }
 }
 
+/// Create a backend from a full display URI (e.g. "s3://bucket/prefix").
+/// Returns the backend and the bare prefix to pass to list().
+async fn create_backend_from_uri(uri: &str) -> Result<(Arc<dyn Backend>, String)> {
+    if uri.starts_with("s3://") {
+        #[cfg(feature = "s3")]
+        {
+            let (bucket, prefix) = S3Backend::from_uri(uri)?;
+            let backend = S3Backend::new(bucket).await?;
+            return Ok((Arc::new(backend), prefix));
+        }
+        #[cfg(not(feature = "s3"))]
+        anyhow::bail!("S3 support not enabled (build with --features s3)");
+    }
+    anyhow::bail!("Unsupported URI scheme: {}", uri)
+}
+
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     backend: Arc<dyn Backend>,
     initial_prefix: String,
     config: Config,
     config_error: Option<String>,
-) -> Result<App> {
+) -> Result<(App, Arc<dyn Backend>)> {
+    let mut backend = backend;
     let mut app = App::new(backend.clone(), initial_prefix.clone(), config.preview_width_percent);
 
     // Load history from state
@@ -195,7 +212,7 @@ async fn run_app(
             app.update_entries(result);
             // Add initial location to history (if it's not a numeric folder)
             if should_add_to_history(&initial_prefix) {
-                app.add_to_history(initial_prefix.clone());
+                app.add_to_history(backend.get_display_path(&initial_prefix));
             }
         }
         Err(e) => {
@@ -443,21 +460,41 @@ async fn run_app(
                         // Handle history mode - select entry and navigate
                         // Check both History mode and Search mode with searching_history flag
                         if app.mode() == &AppMode::History || (app.is_search_mode() && app.is_searching_history()) {
-                            if let Some(selected_path) = app.selected_history_entry().map(|s| s.clone()) {
-                                app.exit_history_mode();
-                                match backend.list(&selected_path).await {
-                                    Ok(result) => {
-                                        app.update_entries(result);
-                                        app.clear_status();
-                                        // Add to history (already filtered when it was first added)
-                                        if should_add_to_history(&selected_path) {
-                                            app.add_to_history(selected_path);
+                            if let Some(selected_uri) = app.selected_history_entry().map(|s| s.clone()) {
+                                let nav_prefix = if let Some(prefix) = backend.uri_to_prefix(&selected_uri) {
+                                    // Same backend
+                                    Some(prefix)
+                                } else {
+                                    // Different backend — try to switch
+                                    match create_backend_from_uri(&selected_uri).await {
+                                        Ok((new_backend, prefix)) => {
+                                            backend = new_backend;
+                                            app.set_backend(backend.clone());
+                                            Some(prefix)
                                         }
-                                        // Load preview for first item
-                                        load_preview_if_needed(&mut app, &backend, &config).await;
+                                        Err(e) => {
+                                            app.show_error(format!("Cannot switch backend: {}", e));
+                                            None
+                                        }
                                     }
-                                    Err(e) => {
-                                        app.show_error(format!("Error: {}", e));
+                                };
+
+                                if let Some(nav_prefix) = nav_prefix {
+                                    app.exit_history_mode();
+                                    match backend.list(&nav_prefix).await {
+                                        Ok(result) => {
+                                            app.update_entries(result);
+                                            app.clear_status();
+                                            // Re-add to history to bump it to the top
+                                            if should_add_to_history(&nav_prefix) {
+                                                app.add_to_history(backend.get_display_path(&nav_prefix));
+                                            }
+                                            // Load preview for first item
+                                            load_preview_if_needed(&mut app, &backend, &config).await;
+                                        }
+                                        Err(e) => {
+                                            app.show_error(format!("Error: {}", e));
+                                        }
                                     }
                                 }
                             }
@@ -491,7 +528,7 @@ async fn run_app(
                                             app.clear_status();
                                             // Add to history (skip folders ending in just numbers)
                                             if should_add_to_history(&new_prefix) {
-                                                app.add_to_history(new_prefix.clone());
+                                                app.add_to_history(backend.get_display_path(&new_prefix));
                                             }
                                             // Load preview for first item
                                             load_preview_if_needed(&mut app, &backend, &config).await;
@@ -874,7 +911,7 @@ async fn run_app(
         }
     }
 
-    Ok(app)
+    Ok((app, backend))
 }
 
 /// Load preview if needed for current selection

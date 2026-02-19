@@ -160,9 +160,22 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
+    fn location_name(&self) -> String {
+        self.root.to_string_lossy().to_string()
+    }
+
     fn get_display_path(&self, prefix: &str) -> String {
         let path = self.resolve_path(prefix);
         format!("local://{}", path.display())
+    }
+
+    fn uri_to_prefix(&self, uri: &str) -> Option<String> {
+        let local_scheme = "local://";
+        let abs_path = uri.strip_prefix(local_scheme)?;
+        let abs = std::path::PathBuf::from(abs_path);
+        abs.strip_prefix(&self.root)
+            .ok()
+            .map(|rel| rel.to_string_lossy().to_string())
     }
 
     fn get_parent(&self, prefix: &str) -> Option<String> {
@@ -180,5 +193,222 @@ impl Backend for LocalBackend {
                 Some(parent)
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_new_valid_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf());
+        assert!(backend.is_ok());
+    }
+
+    #[test]
+    fn test_new_nonexistent_directory() {
+        let result = LocalBackend::new(PathBuf::from("/nonexistent/path/xyz"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_new_not_a_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("file.txt");
+        fs::write(&file_path, "test").unwrap();
+
+        let result = LocalBackend::new(file_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_path_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let resolved = backend.resolve_path("");
+        assert_eq!(resolved, temp_dir.path());
+    }
+
+    #[test]
+    fn test_resolve_path_with_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let resolved = backend.resolve_path("/subdir");
+        assert_eq!(resolved, temp_dir.path().join("subdir"));
+    }
+
+    #[test]
+    fn test_resolve_path_leading_slash() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let resolved = backend.resolve_path("/test");
+        assert_eq!(resolved, temp_dir.path().join("test"));
+    }
+
+    #[tokio::test]
+    async fn test_list_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let result = backend.list("").await.unwrap();
+        assert_eq!(result.entries.len(), 0);
+        assert_eq!(result.prefix, "");
+    }
+
+    #[tokio::test]
+    async fn test_list_with_files() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file1.txt"), "test").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "test").unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let result = backend.list("").await.unwrap();
+        assert_eq!(result.entries.len(), 2);
+        assert!(result.entries.iter().any(|e| e.name == "file1.txt"));
+        assert!(result.entries.iter().any(|e| e.name == "file2.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_list_directories_first() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::create_dir(temp_dir.path().join("dir")).unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "test").unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let result = backend.list("").await.unwrap();
+        assert_eq!(result.entries.len(), 2);
+        // Directory should come first
+        assert_eq!(result.entries[0].name, "dir");
+        assert!(result.entries[0].is_dir);
+        assert_eq!(result.entries[1].name, "file.txt");
+        assert!(!result.entries[1].is_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_sizes() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "hello").unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let result = backend.list("").await.unwrap();
+        assert_eq!(result.entries[0].size, Some(5));
+    }
+
+    #[tokio::test]
+    async fn test_get_preview_text_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "Hello World").unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let preview = backend.get_preview("test.txt", 1024).await.unwrap();
+        match preview {
+            PreviewContent::Text(content) => assert_eq!(content, "Hello World"),
+            _ => panic!("Expected text preview"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_preview_file_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let preview = backend.get_preview("nonexistent.txt", 1024).await.unwrap();
+        match preview {
+            PreviewContent::Error(msg) => assert_eq!(msg, "File not found"),
+            _ => panic!("Expected error preview"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_preview_too_large() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("large.txt");
+        let large_content = "x".repeat(2000);
+        fs::write(&file_path, large_content).unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let preview = backend.get_preview("large.txt", 100).await.unwrap();
+        match preview {
+            PreviewContent::TooLarge { size } => assert_eq!(size, 2000),
+            _ => panic!("Expected too large preview"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_preview_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::create_dir(temp_dir.path().join("subdir")).unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let preview = backend.get_preview("subdir", 1024).await.unwrap();
+        match preview {
+            PreviewContent::Error(msg) => assert_eq!(msg, "Not a file"),
+            _ => panic!("Expected error preview"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_preview_binary_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("binary.bin");
+        // Write binary data (invalid UTF-8)
+        fs::write(&file_path, vec![0xFF, 0xFE, 0x00, 0x01]).unwrap();
+
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let preview = backend.get_preview("binary.bin", 1024).await.unwrap();
+        match preview {
+            PreviewContent::Binary { size, .. } => assert_eq!(size, 4),
+            _ => panic!("Expected binary preview"),
+        }
+    }
+
+    #[test]
+    fn test_get_display_path_root() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let display = backend.get_display_path("");
+        assert!(display.starts_with("local://"));
+    }
+
+    #[test]
+    fn test_get_display_path_with_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let display = backend.get_display_path("/subdir");
+        assert!(display.contains("subdir"));
+    }
+
+    #[test]
+    fn test_get_parent_root() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let parent = backend.get_parent("");
+        assert_eq!(parent, None);
+    }
+
+    #[test]
+    fn test_get_parent_one_level() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let parent = backend.get_parent("/subdir");
+        assert_eq!(parent, Some(String::new()));
+    }
+
+    #[test]
+    fn test_get_parent_multiple_levels() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let parent = backend.get_parent("/a/b/c");
+        assert_eq!(parent, Some("a/b".to_string()));
+    }
+
+    #[test]
+    fn test_get_parent_trailing_slash() {
+        let temp_dir = TempDir::new().unwrap();
+        let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
+        let parent = backend.get_parent("/subdir/");
+        assert_eq!(parent, Some(String::new()));
     }
 }

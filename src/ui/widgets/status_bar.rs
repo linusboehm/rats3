@@ -167,26 +167,10 @@ fn format_download_progress(app: &App) -> String {
     };
 
     if !in_progress_downloads.is_empty() {
-        // Calculate combined stats for all in-progress downloads
-        let in_progress_downloaded: u64 = in_progress_downloads.iter().map(|info| info.downloaded).sum();
-        let in_progress_total: u64 = in_progress_downloads
-            .iter()
-            .filter_map(|info| info.total)
-            .sum();
-
-        let current_downloaded = format_size(in_progress_downloaded);
-        let current_total = if in_progress_total > 0 {
-            format_size(in_progress_total)
-        } else {
-            "?".to_string()
-        };
-
         format!(
-            "downloading {}/{} files {} / {} ({} / {} total) {}%",
+            "downloading {}/{} files ({} / {} total) {}%",
             in_progress_count,
             total_files,
-            current_downloaded,
-            current_total,
             format_size(downloaded_size),
             format_size(total_size),
             overall_progress

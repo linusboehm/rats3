@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::config::Config;
 use crate::ui::text_utils;
+use crate::ui::text_utils::truncate_path;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -9,47 +10,6 @@ use ratatui::{
     Frame,
 };
 
-/// Truncate path if too long, keeping the most relevant (rightmost) parts
-fn truncate_path(path: &str, max_width: usize) -> String {
-    if path.len() <= max_width {
-        return path.to_string();
-    }
-
-    // Reserve space for ".../" prefix
-    let prefix = ".../";
-    if max_width <= prefix.len() {
-        return prefix.to_string();
-    }
-
-    let available = max_width - prefix.len();
-
-    // Split path into components
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-
-    if parts.is_empty() {
-        return "/".to_string();
-    }
-
-    // Build path from right to left until we run out of space
-    let mut result = String::new();
-    let mut remaining = available;
-
-    for part in parts.iter().rev() {
-        let part_len = part.len() + 1; // +1 for '/'
-        if remaining >= part_len {
-            if result.is_empty() {
-                result = part.to_string();
-            } else {
-                result = format!("{}/{}", part, result);
-            }
-            remaining -= part_len;
-        } else {
-            break;
-        }
-    }
-
-    format!("{}{}", prefix, result)
-}
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focused: bool) {
     // Clear the area first to hide underlying content
@@ -92,9 +52,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
     // Calculate available width for paths (accounting for borders, icon, and spacing)
     let max_path_width = (area.width as usize).saturating_sub(8); // 2 borders + icon + spacing
 
-    // Get backend for display path conversion
-    let backend = app.backend();
-
     // Create list items from filtered history
     let items: Vec<ListItem> = filtered_indices
         .iter()
@@ -104,10 +61,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
             let icon = "\u{f07b}"; //
             let color = config.colors.file_icon_dir.to_ratatui_color();
 
-            // Get full display path from backend
-            let full_path = backend.get_display_path(path);
-            // Truncate path if needed
-            let display_path = truncate_path(&full_path, max_path_width);
+            // Truncate path if needed (history entries are already full display URIs)
+            let display_path = truncate_path(path, max_path_width);
             let name = format!(" {} {}", icon, display_path);
 
             // Highlight matching text

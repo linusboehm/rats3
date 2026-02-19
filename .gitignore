@@ -1,1 +1,8 @@
 /target
+
+# Coverage reports
+/coverage
+*.profraw
+*.profdata
+/lcov.info
+/cobertura.xml

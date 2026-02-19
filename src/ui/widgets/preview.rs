@@ -1,6 +1,7 @@
 use crate::app::{App, FocusedPanel};
 use crate::backend::PreviewContent;
 use crate::config::Config;
+use crate::ui::text_utils::truncate_path;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -127,6 +128,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
         config.colors.border.to_ratatui_color()
     };
 
+    // Build path string for the preview title: use the previewed file path when
+    // available (file selected), otherwise fall back to the current directory prefix.
+    let current_path = {
+        let max_width = (area.width as usize).saturating_sub(30); // leave room for indicators
+        let raw = app.current_preview_path()
+            .unwrap_or_else(|| {
+                let prefix = app.current_prefix();
+                if prefix.is_empty() { "/" } else { prefix }
+            });
+        truncate_path(raw, max_width)
+    };
+    let wrap_indicator = if app.is_wrap_enabled() { " [wrap]" } else { "" };
+
     if let Some(preview) = app.get_preview() {
         match preview {
             PreviewContent::Text(content) => {
@@ -135,7 +149,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                 let cursor_line = app.preview_cursor_line();
                 let visual_mode = app.is_preview_visual_mode();
 
-                let wrap_indicator = if app.is_wrap_enabled() { " [wrap]" } else { "" };
                 let visual_indicator = if visual_mode { " VISUAL" } else { "" };
 
                 let scroll_info = if total_lines > 0 {
@@ -144,7 +157,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                 } else {
                     String::new()
                 };
-                let title = format!(" Preview{}{}{} ", wrap_indicator, visual_indicator, scroll_info);
+                let title = format!(" {}{}{}{} ", current_path, wrap_indicator, visual_indicator, scroll_info);
 
                 let block = Block::default()
                     .borders(Borders::ALL)
@@ -154,8 +167,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                 render_text_preview(frame, area, content, app, block, config);
             }
             PreviewContent::Binary { size, mime_type } => {
-                let wrap_indicator = if app.is_wrap_enabled() { " [wrap]" } else { "" };
-                let title = format!(" Preview{} ", wrap_indicator);
+                let title = format!(" {}{} ", current_path, wrap_indicator);
 
                 let block = Block::default()
                     .borders(Borders::ALL)
@@ -188,8 +200,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                 frame.render_widget(paragraph, area);
             }
             PreviewContent::TooLarge { size } => {
-                let wrap_indicator = if app.is_wrap_enabled() { " [wrap]" } else { "" };
-                let title = format!(" Preview{} ", wrap_indicator);
+                let title = format!(" {}{} ", current_path, wrap_indicator);
 
                 let block = Block::default()
                     .borders(Borders::ALL)
@@ -215,8 +226,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                 frame.render_widget(paragraph, area);
             }
             PreviewContent::Error(err) => {
-                let wrap_indicator = if app.is_wrap_enabled() { " [wrap]" } else { "" };
-                let title = format!(" Preview{} ", wrap_indicator);
+                let title = format!(" {}{} ", current_path, wrap_indicator);
 
                 let block = Block::default()
                     .borders(Borders::ALL)
@@ -237,8 +247,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
             }
         }
     } else {
-        let wrap_indicator = if app.is_wrap_enabled() { " [wrap]" } else { "" };
-        let title = format!(" Preview{} ", wrap_indicator);
+        let title = format!(" {}{} ", current_path, wrap_indicator);
 
         let block = Block::default()
             .borders(Borders::ALL)

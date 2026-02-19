@@ -110,6 +110,9 @@ download_mode = ["s", "S"]
 # Enter history mode (browse recent locations)
 history_mode = ["r", "R"]
 
+# Enter history mode with search already active
+history_mode_with_search = ["Ctrl-r"]
+
 # Copy current path to clipboard
 copy_path = ["y", "Y"]
 
@@ -134,6 +137,7 @@ navigate_up = ["Left", "h"]
 clear_search = ["Escape"]
 download_mode = ["s", "S"]
 history_mode = ["r", "R"]
+history_mode_with_search = ["Ctrl-r"]
 copy_path = ["y", "Y"]
 ```
 
@@ -154,6 +158,7 @@ navigate_up = ["Ctrl-b"]
 clear_search = ["Ctrl-g"]
 download_mode = ["Ctrl-x d"]
 history_mode = ["Ctrl-x h"]
+history_mode_with_search = ["Ctrl-r"]
 copy_path = ["Alt-w"]
 ```
 
@@ -172,6 +177,7 @@ navigate_up = ["Left", "Backspace"]
 clear_search = ["Escape"]
 download_mode = ["Ctrl-d"]
 history_mode = ["Ctrl-h"]
+history_mode_with_search = ["Ctrl-r"]
 copy_path = ["Ctrl-c"]
 ```
 
@@ -190,6 +196,7 @@ navigate_up = ["a"]
 clear_search = ["Escape"]
 download_mode = ["e"]
 history_mode = ["r"]
+history_mode_with_search = ["Ctrl-r"]
 copy_path = ["c"]
 ```
 

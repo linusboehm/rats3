@@ -70,3 +70,78 @@ impl AppState {
         self.history = history;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_state() {
+        let state = AppState::default();
+        assert_eq!(state.last_location, None);
+        assert!(state.history.is_empty());
+    }
+
+    #[test]
+    fn test_set_last_location() {
+        let mut state = AppState::default();
+        state.set_last_location("/test/path".to_string());
+        assert_eq!(state.last_location, Some("/test/path".to_string()));
+    }
+
+    #[test]
+    fn test_set_history() {
+        let mut state = AppState::default();
+        let history = vec!["/path1".to_string(), "/path2".to_string()];
+        state.set_history(history.clone());
+        assert_eq!(state.history, history);
+    }
+
+    #[test]
+    fn test_multiple_history_updates() {
+        let mut state = AppState::default();
+        state.set_history(vec!["/path1".to_string()]);
+        assert_eq!(state.history.len(), 1);
+
+        state.set_history(vec!["/path1".to_string(), "/path2".to_string()]);
+        assert_eq!(state.history.len(), 2);
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let mut state = AppState::default();
+        state.set_last_location("/test/location".to_string());
+        state.set_history(vec!["/hist1".to_string(), "/hist2".to_string()]);
+
+        let json = serde_json::to_string(&state).unwrap();
+        let deserialized: AppState = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.last_location, state.last_location);
+        assert_eq!(deserialized.history, state.history);
+    }
+
+    #[test]
+    fn test_deserialize_empty_json() {
+        let json = "{}";
+        let state: AppState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.last_location, None);
+        assert!(state.history.is_empty());
+    }
+
+    #[test]
+    fn test_deserialize_with_history_missing() {
+        let json = r#"{"last_location":"/test"}"#;
+        let state: AppState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.last_location, Some("/test".to_string()));
+        assert!(state.history.is_empty()); // Should default to empty
+    }
+
+    #[test]
+    fn test_state_file_path_exists() {
+        // Just verify it can generate a path without panic
+        let result = AppState::state_file();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains("rats3"));
+    }
+}

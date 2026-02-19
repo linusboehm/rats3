@@ -61,8 +61,15 @@ pub trait Backend: Send + Sync {
         progress_callback: Option<ProgressCallback>,
     ) -> Result<()>;
 
-    /// Get a human-readable display path
+    /// Get the root name for this backend (bucket name for S3, root path for local)
+    fn location_name(&self) -> String;
+
+    /// Get a human-readable display path (also used as the persistent history URI)
     fn get_display_path(&self, prefix: &str) -> String;
+
+    /// Convert a stored history URI back to a bare prefix for use with list().
+    /// Returns None if the URI doesn't belong to this backend.
+    fn uri_to_prefix(&self, uri: &str) -> Option<String>;
 
     /// Get the parent prefix/path (for navigating up)
     fn get_parent(&self, prefix: &str) -> Option<String>;

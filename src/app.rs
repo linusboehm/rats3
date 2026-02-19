@@ -549,6 +549,16 @@ impl App {
         &self.backend
     }
 
+    /// Replace the backend (e.g. after switching buckets via history)
+    pub fn set_backend(&mut self, backend: Arc<dyn Backend>) {
+        self.backend = backend;
+    }
+
+    /// Get the root name for the current backend (bucket name for S3, root path for local)
+    pub fn location_name(&self) -> String {
+        self.backend.location_name()
+    }
+
     /// Get the path for the currently selected file (for preview)
     pub fn get_selected_file_path(&self) -> Option<String> {
         let entry = self.selected_entry()?;
@@ -573,6 +583,11 @@ impl App {
     pub fn get_preview(&self) -> Option<&PreviewContent> {
         self.current_preview_path.as_ref()
             .and_then(|path| self.preview_cache.get(path))
+    }
+
+    /// Get the path of the file currently being previewed
+    pub fn current_preview_path(&self) -> Option<&str> {
+        self.current_preview_path.as_deref()
     }
 
     /// Check if preview needs loading for current selection
@@ -1137,4 +1152,442 @@ impl App {
 pub enum NavigateDirection {
     Into,
     Up,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::{Backend, Entry, ListResult, PreviewContent};
+    use async_trait::async_trait;
+    use std::path::Path;
+
+    // Mock backend for testing
+    struct MockBackend {
+        entries: Vec<Entry>,
+    }
+
+    impl MockBackend {
+        fn new() -> Self {
+            Self {
+                entries: vec![
+                    Entry {
+                        name: "file1.txt".to_string(),
+                        is_dir: false,
+                        size: Some(100),
+                        modified: None,
+                    },
+                    Entry {
+                        name: "dir1".to_string(),
+                        is_dir: true,
+                        size: None,
+                        modified: None,
+                    },
+                    Entry {
+                        name: "file2.txt".to_string(),
+                        is_dir: false,
+                        size: Some(200),
+                        modified: None,
+                    },
+                ],
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Backend for MockBackend {
+        async fn list(&self, _prefix: &str) -> anyhow::Result<ListResult> {
+            Ok(ListResult {
+                entries: self.entries.clone(),
+                prefix: String::new(),
+            })
+        }
+
+        async fn get_preview(&self, _path: &str, _max_size: usize) -> anyhow::Result<PreviewContent> {
+            Ok(PreviewContent::Text("test content".to_string()))
+        }
+
+        async fn download_file(
+            &self,
+            _path: &str,
+            _destination: &Path,
+            _progress_callback: Option<crate::backend::ProgressCallback>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn location_name(&self) -> String {
+            "mock".to_string()
+        }
+
+        fn get_display_path(&self, prefix: &str) -> String {
+            format!("mock://{}", prefix)
+        }
+
+        fn uri_to_prefix(&self, uri: &str) -> Option<String> {
+            uri.strip_prefix("mock://").map(|s| s.to_string())
+        }
+
+        fn get_parent(&self, _prefix: &str) -> Option<String> {
+            Some("parent".to_string())
+        }
+    }
+
+    fn create_test_app() -> App {
+        let backend = Arc::new(MockBackend::new());
+        let mut app = App::new(backend, String::new(), 50);
+        // Initialize with test data
+        app.update_entries(ListResult {
+            entries: MockBackend::new().entries.clone(),
+            prefix: String::new(),
+        });
+        app
+    }
+
+    #[test]
+    fn test_app_creation() {
+        let backend = Arc::new(MockBackend::new());
+        let app = App::new(backend, "/test".to_string(), 50);
+        assert_eq!(app.current_prefix(), "/test");
+        assert!(!app.should_quit());
+    }
+
+    #[test]
+    fn test_quit() {
+        let mut app = create_test_app();
+        assert!(!app.should_quit());
+        app.quit();
+        assert!(app.should_quit());
+    }
+
+    #[test]
+    fn test_status_messages() {
+        let mut app = create_test_app();
+
+        app.show_info("Info message");
+        assert!(app.status_message().is_some());
+        assert_eq!(app.status_message().unwrap().severity, crate::status::StatusSeverity::Info);
+
+        app.show_success("Success");
+        assert_eq!(app.status_message().unwrap().severity, crate::status::StatusSeverity::Success);
+
+        app.show_warning("Warning");
+        assert_eq!(app.status_message().unwrap().severity, crate::status::StatusSeverity::Warning);
+
+        app.show_error("Error");
+        assert_eq!(app.status_message().unwrap().severity, crate::status::StatusSeverity::Error);
+
+        app.clear_status();
+        assert!(app.status_message().is_none());
+    }
+
+    #[test]
+    fn test_search_mode() {
+        let mut app = create_test_app();
+        assert!(!app.is_search_mode());
+
+        app.enter_search_mode();
+        assert!(app.is_search_mode());
+        assert_eq!(app.mode(), &AppMode::Search);
+
+        app.exit_search_mode();
+        assert!(!app.is_search_mode());
+        assert_eq!(app.mode(), &AppMode::Normal);
+    }
+
+    #[test]
+    fn test_search_query() {
+        let mut app = create_test_app();
+        assert_eq!(app.search_query(), "");
+
+        app.set_search_query("test".to_string());
+        assert_eq!(app.search_query(), "test");
+
+        app.enter_search_mode();
+        app.append_search_char('x');
+        assert_eq!(app.search_query(), "testx");
+
+        app.backspace_search();
+        assert_eq!(app.search_query(), "test");
+    }
+
+    #[test]
+    fn test_navigation_move_down() {
+        let mut app = create_test_app();
+        assert_eq!(app.selected_index(), 0);
+
+        app.move_down();
+        assert_eq!(app.selected_index(), 1);
+
+        app.move_down();
+        assert_eq!(app.selected_index(), 2);
+
+        // Should stay at bottom
+        app.move_down();
+        assert_eq!(app.selected_index(), 2);
+    }
+
+    #[test]
+    fn test_navigation_move_up() {
+        let mut app = create_test_app();
+        app.jump_to_bottom();
+        assert_eq!(app.selected_index(), 2);
+
+        app.move_up();
+        assert_eq!(app.selected_index(), 1);
+
+        app.move_up();
+        assert_eq!(app.selected_index(), 0);
+
+        // Should stay at top
+        app.move_up();
+        assert_eq!(app.selected_index(), 0);
+    }
+
+    #[test]
+    fn test_jump_to_top_bottom() {
+        let mut app = create_test_app();
+        app.jump_to_bottom();
+        assert_eq!(app.selected_index(), 2);
+
+        app.jump_to_top();
+        assert_eq!(app.selected_index(), 0);
+    }
+
+    #[test]
+    fn test_jump_up_down() {
+        let mut app = create_test_app();
+        app.jump_down(2);
+        assert_eq!(app.selected_index(), 2);
+
+        app.jump_up(1);
+        assert_eq!(app.selected_index(), 1);
+    }
+
+    #[test]
+    fn test_history_management() {
+        let mut app = create_test_app();
+        assert_eq!(app.history().len(), 0);
+
+        app.add_to_history("/path1".to_string());
+        assert_eq!(app.history().len(), 1);
+
+        app.add_to_history("/path2".to_string());
+        assert_eq!(app.history().len(), 2);
+
+        // Most recently added is at index 0
+        assert_eq!(app.history()[0], "/path2");
+        assert_eq!(app.history()[1], "/path1");
+    }
+
+    #[test]
+    fn test_history_mode() {
+        let mut app = create_test_app();
+        app.add_to_history("/path1".to_string());
+
+        app.enter_history_mode();
+        assert_eq!(app.mode(), &AppMode::History);
+
+        app.exit_history_mode();
+        assert_eq!(app.mode(), &AppMode::Normal);
+    }
+
+    #[test]
+    fn test_history_navigation() {
+        let mut app = create_test_app();
+        app.add_to_history("/path1".to_string());
+        app.add_to_history("/path2".to_string());
+        app.add_to_history("/path3".to_string());
+
+        app.enter_history_mode();
+        assert_eq!(app.history_selected_index(), 0);
+
+        app.history_move_down();
+        assert_eq!(app.history_selected_index(), 1);
+
+        app.history_move_down();
+        assert_eq!(app.history_selected_index(), 2);
+
+        app.history_move_up();
+        assert_eq!(app.history_selected_index(), 1);
+    }
+
+    #[test]
+    fn test_visual_mode() {
+        let mut app = create_test_app();
+        assert_eq!(app.mode(), &AppMode::Normal);
+
+        app.enter_visual_mode();
+        assert_eq!(app.mode(), &AppMode::Visual);
+
+        app.exit_visual_mode();
+        assert_eq!(app.mode(), &AppMode::Normal);
+    }
+
+    #[test]
+    fn test_file_selection() {
+        let mut app = create_test_app();
+        assert_eq!(app.selected_count(), 0);
+
+        app.toggle_selection();
+        assert_eq!(app.selected_count(), 1);
+
+        app.toggle_selection();
+        assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn test_pending_key() {
+        let mut app = create_test_app();
+        assert_eq!(app.pending_key(), None);
+
+        app.set_pending_key('g');
+        assert_eq!(app.pending_key(), Some('g'));
+
+        app.clear_pending_key();
+        assert_eq!(app.pending_key(), None);
+    }
+
+    #[test]
+    fn test_download_mode() {
+        let mut app = create_test_app();
+        assert_eq!(app.mode(), &AppMode::Normal);
+
+        // Download mode requires selected files
+        app.toggle_selection();
+        app.enter_download_mode();
+        assert_eq!(app.mode(), &AppMode::Download);
+
+        app.exit_download_mode();
+        assert_eq!(app.mode(), &AppMode::Normal);
+    }
+
+    #[test]
+    fn test_download_destination_navigation() {
+        let mut app = create_test_app();
+        let initial_idx = app.download_destination_index();
+
+        app.download_move_down(3);
+        // Index might wrap or stay depending on available destinations
+
+        app.download_move_up();
+        app.download_move_up();
+        app.download_move_up();
+        assert_eq!(app.download_destination_index(), initial_idx);
+    }
+
+    #[test]
+    fn test_focused_panel() {
+        let mut app = create_test_app();
+        assert_eq!(app.focused_panel(), &FocusedPanel::Explorer);
+
+        app.focus_preview();
+        assert_eq!(app.focused_panel(), &FocusedPanel::Preview);
+
+        app.focus_explorer();
+        assert_eq!(app.focused_panel(), &FocusedPanel::Explorer);
+    }
+
+    #[test]
+    fn test_toggle_focus() {
+        let mut app = create_test_app();
+        assert_eq!(app.focused_panel(), &FocusedPanel::Explorer);
+
+        app.toggle_focus();
+        assert_eq!(app.focused_panel(), &FocusedPanel::Preview);
+
+        app.toggle_focus();
+        assert_eq!(app.focused_panel(), &FocusedPanel::Explorer);
+    }
+
+    #[test]
+    fn test_preview_width() {
+        let mut app = create_test_app();
+        let initial = app.preview_width_percent();
+
+        app.increase_preview_width();
+        assert!(app.preview_width_percent() > initial || app.preview_width_percent() == 80);
+
+        app.decrease_preview_width();
+        // Should be back to initial or clamped
+    }
+
+    #[test]
+    fn test_help_toggle() {
+        let mut app = create_test_app();
+        assert!(!app.is_help_shown());
+
+        app.toggle_help();
+        assert!(app.is_help_shown());
+
+        app.toggle_help();
+        assert!(!app.is_help_shown());
+    }
+
+    #[test]
+    fn test_wrap_toggle() {
+        let mut app = create_test_app();
+        let initial = app.is_wrap_enabled();
+
+        app.toggle_wrap();
+        assert_eq!(app.is_wrap_enabled(), !initial);
+
+        app.toggle_wrap();
+        assert_eq!(app.is_wrap_enabled(), initial);
+    }
+
+    #[test]
+    fn test_has_active_downloads() {
+        let app = create_test_app();
+        assert!(!app.has_active_downloads());
+    }
+
+    #[test]
+    fn test_entries_and_filtered_indices() {
+        let app = create_test_app();
+        assert_eq!(app.entries().len(), 3);
+        assert_eq!(app.filtered_indices().len(), 3);
+    }
+
+    #[test]
+    fn test_selected_entry() {
+        let app = create_test_app();
+        let entry = app.selected_entry();
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().name, "file1.txt");
+    }
+
+    #[test]
+    fn test_update_entries_and_select() {
+        let mut app = create_test_app();
+        let result = ListResult {
+            entries: vec![
+                Entry {
+                    name: "target.txt".to_string(),
+                    is_dir: false,
+                    size: Some(100),
+                    modified: None,
+                },
+                Entry {
+                    name: "other.txt".to_string(),
+                    is_dir: false,
+                    size: Some(200),
+                    modified: None,
+                },
+            ],
+            prefix: String::new(),
+        };
+
+        app.update_entries_and_select(result, "target.txt");
+        assert_eq!(app.selected_entry().unwrap().name, "target.txt");
+    }
+
+    #[test]
+    fn test_filter_with_search() {
+        let mut app = create_test_app();
+        assert_eq!(app.filtered_indices().len(), 3);
+
+        app.set_search_query("file1".to_string());
+        // Fuzzy matching should filter results
+        assert!(app.filtered_indices().len() <= 3);
+    }
 }

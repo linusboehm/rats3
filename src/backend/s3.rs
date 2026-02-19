@@ -136,6 +136,8 @@ impl Backend for S3Backend {
 
     /// Get preview of an S3 object (READ-ONLY operation)
     /// Uses GetObject which is a read-only S3 operation
+    /// Get preview of an S3 object (READ-ONLY operation)
+    /// Uses GetObject which is a read-only S3 operation
     async fn get_preview(&self, path: &str, max_size: usize) -> Result<PreviewContent> {
         let key = path.trim_start_matches('/');
 
@@ -241,8 +243,23 @@ impl Backend for S3Backend {
         Ok(())
     }
 
+    fn location_name(&self) -> String {
+        format!("s3://{}", self.bucket)
+    }
+
     fn get_display_path(&self, prefix: &str) -> String {
         format!("s3://{}/{}", self.bucket, prefix)
+    }
+
+    fn uri_to_prefix(&self, uri: &str) -> Option<String> {
+        let bucket_prefix = format!("s3://{}/", self.bucket);
+        if let Some(prefix) = uri.strip_prefix(&bucket_prefix) {
+            Some(prefix.to_string())
+        } else if uri == format!("s3://{}", self.bucket) {
+            Some(String::new())
+        } else {
+            None
+        }
     }
 
     fn get_parent(&self, prefix: &str) -> Option<String> {

@@ -126,47 +126,6 @@ fn get_file_icon(name: &str, is_dir: bool, config: &Config) -> (&'static str, Co
     icon_color
 }
 
-/// Truncate path if too long, keeping the most relevant (rightmost) parts
-fn truncate_path(path: &str, max_width: usize) -> String {
-    if path.len() <= max_width {
-        return path.to_string();
-    }
-
-    // Reserve space for ".../" prefix
-    let prefix = ".../";
-    if max_width <= prefix.len() {
-        return prefix.to_string();
-    }
-
-    let available = max_width - prefix.len();
-
-    // Split path into components
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-
-    if parts.is_empty() {
-        return "/".to_string();
-    }
-
-    // Build path from right to left until we run out of space
-    let mut result = String::new();
-    let mut remaining = available;
-
-    for part in parts.iter().rev() {
-        let part_len = part.len() + 1; // +1 for '/'
-        if remaining >= part_len {
-            if result.is_empty() {
-                result = part.to_string();
-            } else {
-                result = format!("{}/{}", part, result);
-            }
-            remaining -= part_len;
-        } else {
-            break;
-        }
-    }
-
-    format!("{}{}", prefix, result)
-}
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focused: bool) {
     let entries = app.entries();
@@ -183,19 +142,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
 
     // Show message if no entries
     if filtered_indices.is_empty() {
-        let raw_path = if app.current_prefix().is_empty() {
-            "/".to_string()
-        } else {
-            app.current_prefix().to_string()
-        };
-
-        let max_path_width = (area.width as usize).saturating_sub(4);
-        let display_path = truncate_path(&raw_path, max_path_width);
-
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
-            .title(format!(" {} ", display_path));
+            .title(format!(" {} ", app.location_name()));
 
         let message = if entries.is_empty() {
             "No files found"
@@ -292,36 +242,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
         })
         .collect();
 
-    // Show path as title with filtered count if searching
-    let raw_path = if app.current_prefix().is_empty() {
-        "/".to_string()
-    } else {
-        app.current_prefix().to_string()
-    };
-
-    // Calculate max width for path (accounting for borders, spaces, and potential match count)
-    let max_path_width = if app.search_query().is_empty() {
-        // " path " + borders (2) = path gets (width - 4)
-        (area.width as usize).saturating_sub(4)
-    } else {
-        // " path (X/Y matches) " - estimate match count takes ~20 chars
-        (area.width as usize).saturating_sub(24)
-    };
-
-    let display_path = truncate_path(&raw_path, max_path_width);
-
+    let location = app.location_name();
     let selected_count = app.selected_count();
     let title = if app.search_query().is_empty() {
         if selected_count > 0 {
-            format!(" {} [{} selected] ", display_path, selected_count)
+            format!(" {} [{} selected] ", location, selected_count)
         } else {
-            format!(" {} ", display_path)
+            format!(" {} ", location)
         }
     } else {
         if selected_count > 0 {
             format!(
                 " {} ({}/{} matches) [{} selected] ",
-                display_path,
+                location,
                 filtered_indices.len(),
                 entries.len(),
                 selected_count
@@ -329,7 +262,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
         } else {
             format!(
                 " {} ({}/{} matches) ",
-                display_path,
+                location,
                 filtered_indices.len(),
                 entries.len()
             )

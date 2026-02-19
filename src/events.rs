@@ -394,8 +394,7 @@ pub fn handle_key(key: KeyEvent, bindings: &KeyBindings, in_search_mode: bool, i
         if bindings.is_history_mode(&key) {
             return Action::EnterHistoryMode;
         }
-        // Ctrl+r enters history mode with search
-        if matches!(key.code, KeyCode::Char('r')) && key.modifiers.contains(KeyModifiers::CONTROL) && !preview_focused {
+        if bindings.is_history_mode_with_search(&key) && !preview_focused {
             return Action::EnterHistoryModeWithSearch;
         }
         if bindings.is_copy_path(&key) {

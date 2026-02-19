@@ -72,6 +72,9 @@ pub struct KeyBindings {
     #[serde(default = "default_history_mode_keys")]
     pub history_mode: Vec<String>,
 
+    #[serde(default = "default_history_mode_with_search_keys")]
+    pub history_mode_with_search: Vec<String>,
+
     #[serde(default = "default_copy_path_keys")]
     pub copy_path: Vec<String>,
 
@@ -311,6 +314,10 @@ fn default_history_mode_keys() -> Vec<String> {
     vec!["r".to_string(), "R".to_string()]
 }
 
+fn default_history_mode_with_search_keys() -> Vec<String> {
+    vec!["Ctrl-r".to_string()]
+}
+
 fn default_copy_path_keys() -> Vec<String> {
     vec!["y".to_string(), "Y".to_string()]
 }
@@ -360,6 +367,7 @@ impl Default for KeyBindings {
             navigate_up: default_navigate_up_keys(),
             download_mode: default_download_mode_keys(),
             history_mode: default_history_mode_keys(),
+            history_mode_with_search: default_history_mode_with_search_keys(),
             copy_path: default_copy_path_keys(),
             wrap_text: default_wrap_text_keys(),
             focus_preview: default_focus_preview_keys(),
@@ -437,6 +445,10 @@ impl KeyBindings {
 
     pub fn is_history_mode(&self, key: &KeyEvent) -> bool {
         self.matches_any(key, &self.history_mode)
+    }
+
+    pub fn is_history_mode_with_search(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.history_mode_with_search)
     }
 
     pub fn is_copy_path(&self, key: &KeyEvent) -> bool {
@@ -578,3 +590,107 @@ impl Config {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.preview_max_size, 102400); // 100KB
+        assert_eq!(config.preview_width_percent, 50);
+        assert_eq!(config.status_message_timeout_secs, 5);
+    }
+
+    #[test]
+    fn test_rgb_color_to_ratatui() {
+        let color = RgbColor { r: 255, g: 128, b: 0 };
+        assert_eq!(color.to_ratatui_color(), Color::Rgb(255, 128, 0));
+    }
+
+    #[test]
+    fn test_rgb_color_black() {
+        let color = RgbColor { r: 0, g: 0, b: 0 };
+        assert_eq!(color.to_ratatui_color(), Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn test_rgb_color_white() {
+        let color = RgbColor { r: 255, g: 255, b: 255 };
+        assert_eq!(color.to_ratatui_color(), Color::Rgb(255, 255, 255));
+    }
+
+    #[test]
+    fn test_default_color_scheme() {
+        let colors = ColorScheme::default();
+        assert_eq!(colors.background.r, 26);
+        assert_eq!(colors.background.g, 27);
+        assert_eq!(colors.background.b, 38);
+    }
+
+    #[test]
+    fn test_download_destination() {
+        let dest = DownloadDestination {
+            name: "Test".to_string(),
+            path: "/tmp".to_string(),
+        };
+        assert_eq!(dest.name, "Test");
+        assert_eq!(dest.path, "/tmp");
+    }
+
+    #[test]
+    fn test_key_bindings_default() {
+        let bindings = KeyBindings::default();
+        assert!(!bindings.quit.is_empty());
+        assert!(!bindings.move_up.is_empty());
+        assert!(!bindings.move_down.is_empty());
+    }
+
+    #[test]
+    fn test_key_bindings_is_quit() {
+        let bindings = KeyBindings::default();
+        let quit_key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(bindings.is_quit(&quit_key));
+    }
+
+    #[test]
+    fn test_key_bindings_is_move_up() {
+        let bindings = KeyBindings::default();
+        let up_key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty());
+        assert!(bindings.is_move_up(&up_key));
+    }
+
+    #[test]
+    fn test_key_bindings_is_move_down() {
+        let bindings = KeyBindings::default();
+        let down_key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty());
+        assert!(bindings.is_move_down(&down_key));
+    }
+
+    #[test]
+    fn test_serialize_deserialize_config() {
+        let config = Config::default();
+        let toml_str = toml::to_string(&config).unwrap();
+        let deserialized: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(deserialized.preview_max_size, config.preview_max_size);
+    }
+
+    #[test]
+    fn test_config_file_path() {
+        let result = Config::config_file();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains("rats3"));
+        assert!(path.to_string_lossy().contains("config.toml"));
+    }
+
+    #[test]
+    fn test_download_destinations_default() {
+        let config = Config::default();
+        assert_eq!(config.download_destinations.len(), 2);
+        assert_eq!(config.download_destinations[0].name, "Downloads");
+        assert_eq!(config.download_destinations[1].name, "Temp");
+    }
+}
+
