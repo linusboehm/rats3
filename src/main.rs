@@ -225,22 +225,13 @@ async fn run_app(
         app.show_warning(format!("Config file error (using defaults): {}", error));
     }
 
-    // Load initial preview
-    if let Some((path, needs_loading)) = app.needs_preview_load() {
-        if needs_loading {
-            let backend_clone = backend.clone();
-            let max_size = config.preview_max_size;
-            tokio::spawn(async move {
-                // Preview loading happens in background
-                let _ = backend_clone.get_preview(&path, max_size).await;
-            });
-        } else {
-            app.update_current_preview_path(path);
-        }
-    }
-
-    // Create channel for download progress updates
+    // Create channels for background tasks
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressMessage>();
+    let (preview_tx, mut preview_rx) = mpsc::unbounded_channel::<(String, PreviewContent)>();
+    let mut pending_preview_cancel: Option<tokio::sync::oneshot::Sender<()>> = None;
+
+    // Load initial preview in background
+    spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
 
     // Main event loop
     loop {
@@ -309,6 +300,11 @@ async fn run_app(
             }
         }
 
+        // Process preview results from background tasks
+        while let Ok((path, content)) = preview_rx.try_recv() {
+            app.receive_preview(path, content);
+        }
+
         // Read events with timeout
         if let Some(event) = read_event(Duration::from_millis(100))? {
             if let crossterm::event::Event::Key(key) = event {
@@ -353,7 +349,7 @@ async fn run_app(
                                 app.update_visual_selection();
                             }
                             // Load preview for new selection
-                            load_preview_if_needed(&mut app, &backend, &config).await;
+                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                         }
                     }
                     Action::MoveDown => {
@@ -379,7 +375,7 @@ async fn run_app(
                                 app.update_visual_selection();
                             }
                             // Load preview for new selection
-                            load_preview_if_needed(&mut app, &backend, &config).await;
+                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                         }
                     }
                     Action::JumpUp(count) => {
@@ -393,7 +389,7 @@ async fn run_app(
                                 app.update_visual_selection();
                             }
                             // Load preview for new selection
-                            load_preview_if_needed(&mut app, &backend, &config).await;
+                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                         }
                     }
                     Action::JumpDown(count) => {
@@ -415,7 +411,7 @@ async fn run_app(
                                 app.update_visual_selection();
                             }
                             // Load preview for new selection
-                            load_preview_if_needed(&mut app, &backend, &config).await;
+                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                         }
                     }
                     Action::JumpToBottom => {
@@ -437,7 +433,7 @@ async fn run_app(
                                 app.update_visual_selection();
                             }
                             // Load preview for new selection
-                            load_preview_if_needed(&mut app, &backend, &config).await;
+                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                         }
                     }
                     Action::JumpToTop => {
@@ -451,7 +447,7 @@ async fn run_app(
                                 app.update_visual_selection();
                             }
                             // Load preview for new selection
-                            load_preview_if_needed(&mut app, &backend, &config).await;
+                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                         }
                     }
                     Action::NavigateInto => {
@@ -490,7 +486,7 @@ async fn run_app(
                                                 app.add_to_history(backend.get_display_path(&nav_prefix));
                                             }
                                             // Load preview for first item
-                                            load_preview_if_needed(&mut app, &backend, &config).await;
+                                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                                         }
                                         Err(e) => {
                                             app.show_error(format!("Error: {}", e));
@@ -531,7 +527,7 @@ async fn run_app(
                                                 app.add_to_history(backend.get_display_path(&new_prefix));
                                             }
                                             // Load preview for first item
-                                            load_preview_if_needed(&mut app, &backend, &config).await;
+                                            spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                                         }
                                         Err(e) => {
                                             app.show_error(format!("Error: {}", e));
@@ -553,7 +549,7 @@ async fn run_app(
                                     }
                                     app.clear_status();
                                     // Load preview for selected item
-                                    load_preview_if_needed(&mut app, &backend, &config).await;
+                                    spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                                 }
                                 Err(e) => {
                                     app.show_error(format!("Error: {}", e));
@@ -914,25 +910,51 @@ async fn run_app(
     Ok((app, backend))
 }
 
-/// Load preview if needed for current selection
-async fn load_preview_if_needed(app: &mut App, backend: &Arc<dyn Backend>, config: &Config) {
+/// Spawn a background task to load the preview for the current selection.
+/// Cancels any previously in-flight preview load first.
+/// Navigation remains responsive while the fetch happens in the background.
+fn spawn_preview_load(
+    app: &mut App,
+    backend: &Arc<dyn Backend>,
+    config: &Config,
+    preview_tx: &mpsc::UnboundedSender<(String, PreviewContent)>,
+    pending_cancel: &mut Option<tokio::sync::oneshot::Sender<()>>,
+) {
+    // Cancel any in-flight load by dropping the old sender
+    *pending_cancel = None;
+
     if let Some((path, needs_loading)) = app.needs_preview_load() {
         if needs_loading {
-            // Need to fetch preview
-            match backend.get_preview(&path, config.preview_max_size).await {
-                Ok(content) => {
-                    app.set_preview(path, content);
+            // Clear current preview so UI shows "Loading preview..."
+            app.clear_preview();
+
+            let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+            *pending_cancel = Some(cancel_tx);
+
+            let backend_clone = backend.clone();
+            let max_size = config.preview_max_size;
+            let tx = preview_tx.clone();
+
+            tokio::spawn(async move {
+                tokio::select! {
+                    result = backend_clone.get_preview(&path, max_size) => {
+                        let content = match result {
+                            Ok(c) => c,
+                            Err(e) => PreviewContent::Error(e.to_string()),
+                        };
+                        let _ = tx.send((path, content));
+                    }
+                    _ = cancel_rx => {
+                        // User moved to another file; discard this result
+                    }
                 }
-                Err(e) => {
-                    app.set_preview(path, PreviewContent::Error(e.to_string()));
-                }
-            }
+            });
         } else {
-            // Already cached, just update current preview path
+            // Already in cache; just update the current path pointer
             app.update_current_preview_path(path);
         }
     } else {
-        // No file selected (e.g., directory selected) - clear preview
+        // Directory selected or empty list — nothing to preview
         app.clear_preview();
     }
 }

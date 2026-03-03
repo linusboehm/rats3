@@ -36,6 +36,108 @@ impl S3Backend {
 
         Ok((bucket, prefix))
     }
+
+    /// Download a large file using parallel range requests.
+    /// Splits the file into 8 MB parts and fetches up to 8 concurrently,
+    /// writing each part directly to its offset in a pre-allocated file.
+    async fn download_multipart(
+        &self,
+        key: &str,
+        destination: &Path,
+        total_size: u64,
+        progress_callback: Option<crate::backend::ProgressCallback>,
+    ) -> Result<()> {
+        use std::os::unix::fs::FileExt;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MB per part
+        const MAX_CONCURRENT: usize = 8;
+
+        // Pre-allocate the output file so parts can write in parallel without resizing
+        let file = std::fs::File::create(destination)
+            .context("Failed to create destination file")?;
+        file.set_len(total_size)
+            .context("Failed to pre-allocate destination file")?;
+        let file = Arc::new(file);
+
+        // Build list of (start_byte, end_byte) ranges
+        let key_str = key.to_string();
+        let parts: Vec<(u64, u64)> = (0..total_size)
+            .step_by(PART_SIZE as usize)
+            .map(|start| (start, (start + PART_SIZE - 1).min(total_size - 1)))
+            .collect();
+
+        let total_downloaded = Arc::new(AtomicU64::new(0));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT));
+        let callback: Option<Arc<dyn Fn(u64, Option<u64>) + Send + Sync>> =
+            progress_callback.map(Arc::from);
+
+        let mut join_set = tokio::task::JoinSet::new();
+
+        for (part_start, part_end) in parts {
+            let client = self.client.clone();
+            let bucket = self.bucket.clone();
+            let key = key_str.clone();
+            let file = file.clone();
+            let total_downloaded = total_downloaded.clone();
+            let callback = callback.clone();
+            let semaphore = semaphore.clone();
+
+            join_set.spawn(async move {
+                let _permit = semaphore
+                    .acquire()
+                    .await
+                    .expect("semaphore closed unexpectedly");
+
+                let range = format!("bytes={}-{}", part_start, part_end);
+                let response = client
+                    .get_object()
+                    .bucket(&bucket)
+                    .key(&key)
+                    .range(range)
+                    .send()
+                    .await
+                    .context("Failed to request S3 object part")?;
+
+                let bytes = response
+                    .body
+                    .collect()
+                    .await
+                    .context("Failed to read S3 object part")?
+                    .into_bytes();
+
+                // pwrite: thread-safe positional write, no seek or mutex needed
+                file.write_at(&bytes, part_start)
+                    .context("Failed to write part to file")?;
+
+                // Report aggregated progress across all parts
+                let prev = total_downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                if let Some(ref cb) = callback {
+                    cb(prev + bytes.len() as u64, Some(total_size));
+                }
+
+                Ok::<(), anyhow::Error>(())
+            });
+        }
+
+        // Collect results; dropping join_set on error aborts remaining part tasks
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    let _ = std::fs::remove_file(destination);
+                    return Err(e);
+                }
+                Err(join_err) => {
+                    let _ = std::fs::remove_file(destination);
+                    anyhow::bail!("Download part panicked: {}", join_err);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -195,8 +297,8 @@ impl Backend for S3Backend {
         }
     }
 
-    /// Download a single file from S3 (READ-ONLY operation)
-    /// Uses GetObject which is a read-only S3 operation
+    /// Download a single file from S3 (READ-ONLY operation).
+    /// For files >= 16 MB, uses parallel range requests for higher throughput.
     async fn download_file(
         &self,
         path: &str,
@@ -207,7 +309,7 @@ impl Backend for S3Backend {
 
         let key = path.trim_start_matches('/');
 
-        // Get the object (READ-ONLY operation)
+        // Get the object (READ-ONLY operation); inspect content-length before reading body
         let response = self
             .client
             .get_object()
@@ -219,12 +321,20 @@ impl Backend for S3Backend {
 
         let total_size = response.content_length().map(|s| s as u64);
 
-        // Create destination file
+        // For large files, drop this response and use parallel range requests instead
+        const MULTIPART_THRESHOLD: u64 = 16 * 1024 * 1024; // 16 MB
+        if let Some(size) = total_size {
+            if size >= MULTIPART_THRESHOLD {
+                drop(response);
+                return self.download_multipart(key, destination, size, progress_callback).await;
+            }
+        }
+
+        // Small file: stream the already-open response directly
         let mut file = tokio::fs::File::create(destination)
             .await
             .context("Failed to create destination file")?;
 
-        // Stream the content to file with progress reporting
         let mut body = response.body;
         let mut downloaded = 0u64;
 

@@ -1,0 +1,25 @@
+# Test configuration with alternative key bindings
+# To test: mv ~/.config/rats3/config.toml ~/.config/rats3/config.toml.backup
+#          cp test_keybindings.toml ~/.config/rats3/config.toml
+#          rats3 --local /tmp
+
+preview_max_size = 102400
+
+[[download_destinations]]
+name = "Downloads"
+path = "~/Downloads"
+
+[key_bindings]
+# Test different bindings
+quit = ["q", "Ctrl-c"]           # Try 'q' to quit
+move_up = ["w", "Up"]            # WASD style
+move_down = ["s", "Down"]
+jump_up = ["Shift-w", "PageUp"]
+jump_down = ["Shift-s", "PageDown"]
+jump_to_bottom = ["End"]
+navigate_into = ["d", "Enter"]   # 'd' to enter directory
+navigate_up = ["a", "Left"]      # 'a' to go back
+clear_search = ["Escape"]
+download_mode = ["e"]            # 'e' for download (like "export")
+history_mode = ["r"]
+copy_path = ["c"]                # 'c' to copy

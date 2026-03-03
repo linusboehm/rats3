@@ -579,6 +579,17 @@ impl App {
         self.reset_preview_scroll();
     }
 
+    /// Receive a preview result from a background task.
+    /// Always caches the result; only updates the current preview path
+    /// if the path is still the currently selected file.
+    pub fn receive_preview(&mut self, path: String, content: PreviewContent) {
+        self.preview_cache.insert(path.clone(), content);
+        if self.get_selected_file_path().as_deref() == Some(&path) {
+            self.current_preview_path = Some(path);
+            self.reset_preview_scroll();
+        }
+    }
+
     /// Get current preview content
     pub fn get_preview(&self) -> Option<&PreviewContent> {
         self.current_preview_path.as_ref()
