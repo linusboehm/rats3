@@ -769,7 +769,16 @@ async fn run_app(
                     }
                     Action::CopyPath => {
                         app.clear_pending_key();
-                        let path = backend.get_display_path(app.current_prefix());
+                        let bare = if let Some(entry) = app.selected_entry() {
+                            if app.current_prefix().is_empty() {
+                                entry.name.clone()
+                            } else {
+                                format!("{}/{}", app.current_prefix(), entry.name)
+                            }
+                        } else {
+                            app.current_prefix().to_string()
+                        };
+                        let path = backend.get_display_path(&bare);
                         match clipboard::copy_to_clipboard(&path) {
                             Ok(_) => {
                                 app.show_success(format!("Copied to clipboard: {}", path));
