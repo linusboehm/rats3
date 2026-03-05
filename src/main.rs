@@ -499,13 +499,21 @@ async fn run_app(
                             let is_file = app.selected_entry().map(|e| !e.is_dir).unwrap_or(false);
 
                             if is_file {
-                                // If it's a file, focus the preview window
+                                // Capture name before any mode change shifts the selection
+                                let selected_name = app.selected_entry().map(|e| e.name.clone());
+
                                 app.focus_preview();
 
-                                // Exit search mode if we were in it
                                 if app.is_search_mode() {
                                     app.exit_search_mode();
+                                    // Restore cursor to the same file in the now-unfiltered list
+                                    if let Some(name) = selected_name {
+                                        app.select_entry_by_name(&name);
+                                    }
                                 }
+
+                                // Ensure the preview is loaded for the (re-)selected file
+                                spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
                             } else {
                                 // Get the navigation target BEFORE exiting search mode
                                 // (otherwise the selection index will be wrong)

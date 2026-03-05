@@ -267,6 +267,19 @@ impl App {
         self.clear_selection();
     }
 
+    /// Select the entry with the given name in the current filtered list.
+    /// Used to restore selection after exiting search mode.
+    pub fn select_entry_by_name(&mut self, name: &str) {
+        for (filtered_idx, &entry_idx) in self.filtered_entries.iter().enumerate() {
+            if let Some(entry) = self.entries.get(entry_idx) {
+                if entry.name == name {
+                    self.selected_index = filtered_idx;
+                    return;
+                }
+            }
+        }
+    }
+
     /// Update entries and select a specific entry by name
     pub fn update_entries_and_select(&mut self, result: ListResult, select_name: &str) {
         self.entries = result.entries;
