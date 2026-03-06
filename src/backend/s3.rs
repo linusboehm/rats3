@@ -256,8 +256,49 @@ impl Backend for S3Backend {
             Ok(head) => {
                 let size = head.content_length().unwrap_or(0) as u64;
 
+                // Extract object metadata from the HEAD response
+                let modified = head.last_modified().and_then(|t| {
+                    chrono::DateTime::from_timestamp(t.secs(), 0)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                });
+                let etag = head.e_tag().map(|s| s.trim_matches('"').to_string());
+                let storage_class = head
+                    .storage_class()
+                    .map(|sc| sc.as_str().to_string());
+                let version_id = head.version_id().map(|s| s.to_string());
+
+                // Resolve the 1-based ordinal for this version (oldest = 1, newest = N).
+                // list_object_versions returns versions newest-first; the current version
+                // sits at some index i, so its ordinal is total - i.
+                let version_number: Option<usize> = if let Some(ref vid) = version_id {
+                    match self
+                        .client
+                        .list_object_versions()
+                        .bucket(&self.bucket)
+                        .prefix(key)
+                        .send()
+                        .await
+                    {
+                        Ok(output) => {
+                            let versions: Vec<_> = output
+                                .versions()
+                                .iter()
+                                .filter(|v| v.key() == Some(key))
+                                .collect();
+                            let total = versions.len();
+                            versions
+                                .iter()
+                                .position(|v| v.version_id() == Some(vid.as_str()))
+                                .map(|i| total - i)
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+
                 if size > max_size as u64 {
-                    return Ok(PreviewContent::TooLarge { size });
+                    return Ok(PreviewContent::TooLarge { size, modified, etag, storage_class, version_id, version_number });
                 }
 
                 // Get the object content (READ-ONLY operation)
@@ -283,10 +324,16 @@ impl Backend for S3Backend {
 
                 // Try to convert to text
                 match String::from_utf8(bytes.to_vec()) {
-                    Ok(content) => Ok(PreviewContent::Text(content)),
+                    Ok(content) => Ok(PreviewContent::Text(content, super::FileMetadata {
+                        size: Some(size),
+                        modified: modified.clone(),
+                        etag: etag.clone(),
+                        storage_class: storage_class.clone(),
+                        version_id: version_id.clone(),
+                        version_number,
+                    })),
                     Err(_) => {
-                        // Binary content
-                        Ok(PreviewContent::Binary { size, mime_type })
+                        Ok(PreviewContent::Binary { size, mime_type, modified, etag, storage_class, version_id, version_number })
                     }
                 }
             }

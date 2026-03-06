@@ -362,7 +362,7 @@ async fn run_app(
                             // Calculate max lines from preview content and visible height
                             if let Some(preview) = app.get_preview() {
                                 let max_lines = match preview {
-                                    rats3::backend::PreviewContent::Text(content) => content.lines().count(),
+                                    rats3::backend::PreviewContent::Text(content, _) => content.lines().count(),
                                     _ => 0,
                                 };
                                 let visible_height = terminal.size().unwrap().height.saturating_sub(10) as usize;
@@ -398,7 +398,7 @@ async fn run_app(
                             // Calculate max lines from preview content and visible height
                             if let Some(preview) = app.get_preview() {
                                 let max_lines = match preview {
-                                    rats3::backend::PreviewContent::Text(content) => content.lines().count(),
+                                    rats3::backend::PreviewContent::Text(content, _) => content.lines().count(),
                                     _ => 0,
                                 };
                                 let visible_height = terminal.size().unwrap().height.saturating_sub(10) as usize;
@@ -420,7 +420,7 @@ async fn run_app(
                             // Calculate max lines from preview content and visible height
                             if let Some(preview) = app.get_preview() {
                                 let max_lines = match preview {
-                                    rats3::backend::PreviewContent::Text(content) => content.lines().count(),
+                                    rats3::backend::PreviewContent::Text(content, _) => content.lines().count(),
                                     _ => 0,
                                 };
                                 let visible_height = terminal.size().unwrap().height.saturating_sub(10) as usize;
@@ -823,7 +823,7 @@ async fn run_app(
                         // Get selected lines from preview
                         if let Some(preview) = app.get_preview() {
                             match preview {
-                                rats3::backend::PreviewContent::Text(content) => {
+                                rats3::backend::PreviewContent::Text(content, _) => {
                                     let (start, end) = app.get_preview_visual_range();
                                     let lines: Vec<&str> = content.lines().collect();
                                     let selected_lines: Vec<&str> = lines.iter()
@@ -875,7 +875,7 @@ async fn run_app(
                         // Calculate max lines and visible height for scroll limit
                         if let Some(preview) = app.get_preview() {
                             let max_lines = match preview {
-                                rats3::backend::PreviewContent::Text(content) => content.lines().count(),
+                                rats3::backend::PreviewContent::Text(content, _) => content.lines().count(),
                                 _ => 0,
                             };
                             let visible_height = terminal.size().unwrap().height.saturating_sub(10) as usize;
@@ -887,7 +887,7 @@ async fn run_app(
                         // Calculate max lines and visible height for scroll limit
                         if let Some(preview) = app.get_preview() {
                             let max_lines = match preview {
-                                rats3::backend::PreviewContent::Text(content) => content.lines().count(),
+                                rats3::backend::PreviewContent::Text(content, _) => content.lines().count(),
                                 _ => 0,
                             };
                             let visible_height = terminal.size().unwrap().height.saturating_sub(10) as usize;
@@ -899,7 +899,7 @@ async fn run_app(
                         // Calculate max lines and visible height for scroll limit
                         if let Some(preview) = app.get_preview() {
                             let max_lines = match preview {
-                                rats3::backend::PreviewContent::Text(content) => content.lines().count(),
+                                rats3::backend::PreviewContent::Text(content, _) => content.lines().count(),
                                 _ => 0,
                             };
                             let visible_height = terminal.size().unwrap().height.saturating_sub(10) as usize;

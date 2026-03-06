@@ -97,19 +97,36 @@ impl Backend for LocalBackend {
         }
 
         let size = metadata.len();
+
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()))
+            .and_then(|secs| {
+                chrono::DateTime::from_timestamp(secs as i64, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            });
+
         if size > max_size as u64 {
-            return Ok(PreviewContent::TooLarge { size });
+            return Ok(PreviewContent::TooLarge { size, modified, etag: None, storage_class: None, version_id: None, version_number: None });
         }
 
         // Try to read as text
         match fs::read_to_string(&file_path) {
-            Ok(content) => Ok(PreviewContent::Text(content)),
+            Ok(content) => Ok(PreviewContent::Text(content, super::FileMetadata {
+                size: Some(size),
+                modified: modified.clone(),
+                etag: None,
+                storage_class: None,
+                version_id: None,
+                version_number: None,
+            })),
             Err(_) => {
                 // Binary file
                 let mime_type = mime_guess::from_path(&file_path)
                     .first()
                     .map(|m| m.to_string());
-                Ok(PreviewContent::Binary { size, mime_type })
+                Ok(PreviewContent::Binary { size, mime_type, modified, etag: None, storage_class: None, version_id: None, version_number: None })
             }
         }
     }
@@ -305,7 +322,7 @@ mod tests {
         let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
         let preview = backend.get_preview("test.txt", 1024).await.unwrap();
         match preview {
-            PreviewContent::Text(content) => assert_eq!(content, "Hello World"),
+            PreviewContent::Text(content, _) => assert_eq!(content, "Hello World"),
             _ => panic!("Expected text preview"),
         }
     }
@@ -331,7 +348,7 @@ mod tests {
         let backend = LocalBackend::new(temp_dir.path().to_path_buf()).unwrap();
         let preview = backend.get_preview("large.txt", 100).await.unwrap();
         match preview {
-            PreviewContent::TooLarge { size } => assert_eq!(size, 2000),
+            PreviewContent::TooLarge { size, .. } => assert_eq!(size, 2000),
             _ => panic!("Expected too large preview"),
         }
     }

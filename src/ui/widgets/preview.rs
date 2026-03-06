@@ -1,5 +1,5 @@
 use crate::app::{App, FocusedPanel};
-use crate::backend::PreviewContent;
+use crate::backend::{FileMetadata, PreviewContent};
 use crate::config::Config;
 use crate::ui::text_utils::truncate_path;
 use ratatui::{
@@ -143,7 +143,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
 
     if let Some(preview) = app.get_preview() {
         match preview {
-            PreviewContent::Text(content) => {
+            PreviewContent::Text(content, meta) => {
                 // Calculate scroll info for title
                 let total_lines = content.lines().count();
                 let cursor_line = app.preview_cursor_line();
@@ -164,9 +164,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     .border_style(Style::default().fg(border_color))
                     .title(title);
 
-                render_text_preview(frame, area, content, app, block, config);
+                render_text_preview(frame, area, content, meta, app, block, config);
             }
-            PreviewContent::Binary { size, mime_type } => {
+            PreviewContent::Binary { size, mime_type, modified, etag, storage_class, version_id, version_number } => {
                 let title = format!(" {}{} ", current_path, wrap_indicator);
 
                 let block = Block::default()
@@ -174,7 +174,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     .border_style(Style::default().fg(border_color))
                     .title(title);
 
-                let text = vec![
+                let mut text = vec![
                     Line::from(""),
                     Line::from(Span::styled(
                         "Binary file",
@@ -182,24 +182,49 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     )),
                     Line::from(""),
                     Line::from(Span::styled(
-                        format!("Size: {}", format_size(*size)),
+                        format!("Size:     {}", format_size(*size)),
                         Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
                     )),
                     Line::from(Span::styled(
-                        format!(
-                            "Type: {}",
-                            mime_type.as_deref().unwrap_or("unknown")
-                        ),
+                        format!("Type:     {}", mime_type.as_deref().unwrap_or("unknown")),
                         Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
                     )),
                 ];
+                if let Some(m) = modified {
+                    text.push(Line::from(Span::styled(
+                        format!("Modified: {}", m),
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
+                if let Some(e) = etag {
+                    text.push(Line::from(Span::styled(
+                        format!("ETag:     {}", e),
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
+                if let Some(sc) = storage_class {
+                    text.push(Line::from(Span::styled(
+                        format!("Storage:  {}", sc),
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
+                if let Some(v) = version_id {
+                    let version_label = match version_number {
+                        Some(n) => format!("Version:  {} ({})", n, v),
+                        None => format!("Version:  {}", v),
+                    };
+                    text.push(Line::from(Span::styled(
+                        version_label,
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
                 let mut paragraph = Paragraph::new(text).block(block);
                 if app.is_wrap_enabled() {
                     paragraph = paragraph.wrap(Wrap { trim: false });
                 }
                 frame.render_widget(paragraph, area);
             }
-            PreviewContent::TooLarge { size } => {
+            PreviewContent::TooLarge { size, modified, etag, storage_class, version_id, version_number } => {
                 let title = format!(" {}{} ", current_path, wrap_indicator);
 
                 let block = Block::default()
@@ -207,7 +232,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     .border_style(Style::default().fg(border_color))
                     .title(title);
 
-                let text = vec![
+                let mut text = vec![
                     Line::from(""),
                     Line::from(Span::styled(
                         "File too large for preview",
@@ -215,10 +240,38 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     )),
                     Line::from(""),
                     Line::from(Span::styled(
-                        format!("Size: {}", format_size(*size)),
+                        format!("Size:     {}", format_size(*size)),
                         Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
                     )),
                 ];
+                if let Some(m) = modified {
+                    text.push(Line::from(Span::styled(
+                        format!("Modified: {}", m),
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
+                if let Some(e) = etag {
+                    text.push(Line::from(Span::styled(
+                        format!("ETag:     {}", e),
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
+                if let Some(sc) = storage_class {
+                    text.push(Line::from(Span::styled(
+                        format!("Storage:  {}", sc),
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
+                if let Some(v) = version_id {
+                    let version_label = match version_number {
+                        Some(n) => format!("Version:  {} ({})", n, v),
+                        None => format!("Version:  {}", v),
+                    };
+                    text.push(Line::from(Span::styled(
+                        version_label,
+                        Style::default().fg(config.colors.text_secondary.to_ratatui_color()),
+                    )));
+                }
                 let mut paragraph = Paragraph::new(text).block(block);
                 if app.is_wrap_enabled() {
                     paragraph = paragraph.wrap(Wrap { trim: false });
@@ -290,6 +343,7 @@ fn render_text_preview(
     frame: &mut Frame,
     area: Rect,
     content: &str,
+    meta: &FileMetadata,
     app: &App,
     block: Block,
     config: &Config,
@@ -301,7 +355,7 @@ fn render_text_preview(
         .and_then(|p| std::path::Path::new(p).extension())
         .and_then(|e| e.to_str());
 
-    let all_lines = if let Some(ext) = extension {
+    let mut all_lines = if let Some(ext) = extension {
         // Special handling for CSV files
         if ext == "csv" {
             highlight_csv(content, config)
@@ -316,6 +370,53 @@ fn render_text_preview(
     } else {
         plain_text_lines(content, config)
     };
+
+    // Append metadata footer if any metadata fields are present
+    let meta_has_content = meta.size.is_some()
+        || meta.modified.is_some()
+        || meta.etag.is_some()
+        || meta.storage_class.is_some()
+        || meta.version_id.is_some();
+
+    if meta_has_content {
+        let sep_style = Style::default().fg(config.colors.text_secondary.to_ratatui_color());
+        all_lines.push(Line::from(Span::styled("", sep_style)));
+        all_lines.push(Line::from(Span::styled(
+            "─".repeat(40),
+            sep_style,
+        )));
+        if let Some(s) = meta.size {
+            all_lines.push(Line::from(Span::styled(
+                format!("Size:     {}", format_size(s)),
+                sep_style,
+            )));
+        }
+        if let Some(m) = &meta.modified {
+            all_lines.push(Line::from(Span::styled(
+                format!("Modified: {}", m),
+                sep_style,
+            )));
+        }
+        if let Some(e) = &meta.etag {
+            all_lines.push(Line::from(Span::styled(
+                format!("ETag:     {}", e),
+                sep_style,
+            )));
+        }
+        if let Some(sc) = &meta.storage_class {
+            all_lines.push(Line::from(Span::styled(
+                format!("Storage:  {}", sc),
+                sep_style,
+            )));
+        }
+        if let Some(v) = &meta.version_id {
+            let version_label = match meta.version_number {
+                Some(n) => format!("Version:  {} ({})", n, v),
+                None => format!("Version:  {}", v),
+            };
+            all_lines.push(Line::from(Span::styled(version_label, sep_style)));
+        }
+    }
 
     // Apply scroll offset and cursor/visual highlighting
     let scroll_offset = app.preview_scroll_offset();

@@ -23,12 +23,40 @@ pub struct ListResult {
     pub prefix: String,
 }
 
+/// Metadata associated with a file (used in all preview variants)
+#[derive(Debug, Clone, Default)]
+pub struct FileMetadata {
+    pub size: Option<u64>,
+    pub modified: Option<String>,
+    pub etag: Option<String>,
+    pub storage_class: Option<String>,
+    pub version_id: Option<String>,
+    /// 1-based ordinal of this version (oldest = 1, newest = N); None if versioning
+    /// is disabled or the version list could not be fetched.
+    pub version_number: Option<usize>,
+}
+
 /// Preview content for a file
 #[derive(Debug, Clone)]
 pub enum PreviewContent {
-    Text(String),
-    Binary { size: u64, mime_type: Option<String> },
-    TooLarge { size: u64 },
+    Text(String, FileMetadata),
+    Binary {
+        size: u64,
+        mime_type: Option<String>,
+        modified: Option<String>,
+        etag: Option<String>,
+        storage_class: Option<String>,
+        version_id: Option<String>,
+        version_number: Option<usize>,
+    },
+    TooLarge {
+        size: u64,
+        modified: Option<String>,
+        etag: Option<String>,
+        storage_class: Option<String>,
+        version_id: Option<String>,
+        version_number: Option<usize>,
+    },
     Error(String),
 }
 

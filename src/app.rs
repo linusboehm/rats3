@@ -1097,7 +1097,7 @@ impl App {
 
         // Get preview content and clone it to avoid borrow checker issues
         let content_opt = self.get_preview().and_then(|preview| {
-            if let PreviewContent::Text(content) = preview {
+            if let PreviewContent::Text(content, _) = preview {
                 Some(content.clone())
             } else {
                 None
@@ -1227,7 +1227,7 @@ mod tests {
         }
 
         async fn get_preview(&self, _path: &str, _max_size: usize) -> anyhow::Result<PreviewContent> {
-            Ok(PreviewContent::Text("test content".to_string()))
+            Ok(PreviewContent::Text("test content".to_string(), Default::default()))
         }
 
         async fn download_file(
