@@ -3,11 +3,13 @@ use crate::config::Config;
 use crate::ui::widgets::{download_selector, file_list, history_list, preview, search_bar, status_bar};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    text::Line,
     Frame,
 };
+use std::collections::HashMap;
 
 /// Render the main UI
-pub fn render(frame: &mut Frame, app: &App, config: &Config) {
+pub fn render(frame: &mut Frame, app: &App, config: &Config, highlighted: &HashMap<String, Vec<Line<'static>>>) {
     let area = frame.size();
 
     let vertical_chunks = Layout::default()
@@ -39,7 +41,7 @@ pub fn render(frame: &mut Frame, app: &App, config: &Config) {
 
     // Always render file list and preview
     file_list::render(frame, content_chunks[0], app, config, explorer_focused);
-    preview::render(frame, content_chunks[1], app, config, preview_focused);
+    preview::render(frame, content_chunks[1], app, config, preview_focused, highlighted);
 
     // Render status bar
     status_bar::render(frame, vertical_chunks[2], app, config);

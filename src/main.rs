@@ -14,6 +14,8 @@ use rats3::{
     state::AppState,
     ui,
 };
+use ratatui::text::Line;
+use std::collections::HashMap;
 #[cfg(feature = "s3")]
 use rats3::backend::s3::S3Backend;
 use std::{io, path::PathBuf, sync::Arc, time::Duration};
@@ -229,12 +231,14 @@ async fn run_app(
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressMessage>();
     let (preview_tx, mut preview_rx) = mpsc::unbounded_channel::<(String, PreviewContent)>();
     let mut pending_preview_cancel: Option<tokio::sync::oneshot::Sender<()>> = None;
+    let (highlight_tx, mut highlight_rx) = mpsc::unbounded_channel::<(String, Vec<Line<'static>>)>();
+    let mut highlighted_cache: HashMap<String, Vec<Line<'static>>> = HashMap::new();
 
     // Load initial preview in background
     spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
 
     // Initial render before entering the event loop
-    terminal.draw(|f| ui::render(f, &app, &config))?;
+    terminal.draw(|f| ui::render(f, &app, &config, &highlighted_cache))?;
 
     // Main event loop
     loop {
@@ -300,7 +304,36 @@ async fn run_app(
 
         // Process preview results from background tasks
         while let Ok((path, content)) = preview_rx.try_recv() {
+            // If this is a text file with syntect support, kick off background highlighting
+            if let PreviewContent::Text(ref text, _) = content {
+                if let Some(syntax) = ui::widgets::preview::find_syntax_for_path(&path) {
+                    let text_owned = text.clone();
+                    let path_owned = path.clone();
+                    let line_num_color = config.colors.text_secondary.to_ratatui_color();
+                    let tx = highlight_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let lines = ui::widgets::preview::build_highlight_lines(
+                            &text_owned,
+                            syntax,
+                            line_num_color,
+                        );
+                        let _ = tx.send((path_owned, lines));
+                    });
+                }
+            }
             app.receive_preview(path, content);
+            dirty = true;
+        }
+
+        // Process completed highlight jobs
+        while let Ok((path, lines)) = highlight_rx.try_recv() {
+            if highlighted_cache.len() >= config.highlight_cache_size {
+                // Evict the entry whose key sorts first (stable, arbitrary but deterministic)
+                if let Some(oldest) = highlighted_cache.keys().next().map(|k| k.clone()) {
+                    highlighted_cache.remove(&oldest);
+                }
+            }
+            highlighted_cache.insert(path, lines);
             dirty = true;
         }
 
@@ -925,7 +958,7 @@ async fn run_app(
 
         // Only re-render when something actually changed
         if dirty {
-            terminal.draw(|f| ui::render(f, &app, &config))?;
+            terminal.draw(|f| ui::render(f, &app, &config, &highlighted_cache))?;
 
             if app.should_quit() {
                 break;

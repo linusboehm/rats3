@@ -31,6 +31,10 @@ pub struct Config {
     /// Color scheme
     #[serde(default)]
     pub colors: ColorScheme,
+
+    /// Number of files to keep in the syntax-highlight cache (default: 2)
+    #[serde(default = "default_highlight_cache_size")]
+    pub highlight_cache_size: usize,
 }
 
 /// Key binding configuration
@@ -257,6 +261,10 @@ fn default_preview_max_size() -> usize {
     102400 // 100KB
 }
 
+fn default_highlight_cache_size() -> usize {
+    2
+}
+
 fn default_status_message_timeout_secs() -> u64 {
     5 // 5 seconds
 }
@@ -397,6 +405,7 @@ impl Default for Config {
             ],
             key_bindings: KeyBindings::default(),
             colors: ColorScheme::default(),
+            highlight_cache_size: default_highlight_cache_size(),
         }
     }
 }
