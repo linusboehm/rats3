@@ -355,20 +355,37 @@ fn render_text_preview(
         .and_then(|p| std::path::Path::new(p).extension())
         .and_then(|e| e.to_str());
 
+    let total_lines = content.lines().count();
+    // Subtract 2 for the block borders
+    let visible_height = area.height.saturating_sub(2) as usize;
+
+    // When search-filtering we need every line to match against search_results;
+    // otherwise only request the visible window so highlight functions can skip work.
+    let scroll_offset = app.preview_scroll_offset();
+    let search_active = app.is_preview_search_active();
+    let search_query = app.preview_search_query();
+    let should_filter = search_active && !search_query.is_empty();
+
+    let (hl_start, hl_count) = if should_filter {
+        (0, total_lines)
+    } else {
+        (scroll_offset, visible_height)
+    };
+
     let mut all_lines = if let Some(ext) = extension {
         // Special handling for CSV files
         if ext == "csv" {
-            highlight_csv(content, config)
+            highlight_csv(content, config, hl_start, hl_count, total_lines)
         } else if let Some(syntax) = SYNTAX_SET.find_syntax_by_extension(ext) {
             // Try syntax highlighting
-            highlight_text(content, syntax, config)
+            highlight_text(content, syntax, config, hl_start, hl_count, total_lines)
         } else {
             // No syntax found, plain text
             // Note: TOML files fall back to plain text as syntect doesn't include TOML by default
-            plain_text_lines(content, config)
+            plain_text_lines(content, config, hl_start, hl_count, total_lines)
         }
     } else {
-        plain_text_lines(content, config)
+        plain_text_lines(content, config, hl_start, hl_count, total_lines)
     };
 
     // Append metadata footer if any metadata fields are present
@@ -419,7 +436,6 @@ fn render_text_preview(
     }
 
     // Apply scroll offset and cursor/visual highlighting
-    let scroll_offset = app.preview_scroll_offset();
     let cursor_line = app.preview_cursor_line();
     let is_focused = matches!(app.focused_panel(), FocusedPanel::Preview);
     let visual_mode = app.is_preview_visual_mode();
@@ -429,10 +445,6 @@ fn render_text_preview(
         (0, 0)
     };
 
-    // Check if we should filter lines based on search
-    let search_active = app.is_preview_search_active();
-    let search_query = app.preview_search_query();
-    let should_filter = search_active && !search_query.is_empty();
     let search_results = if should_filter {
         app.preview_search_results()
     } else {
@@ -445,6 +457,9 @@ fn render_text_preview(
     let lines: Vec<Line> = all_lines
         .into_iter()
         .enumerate()
+        // Restore the original document line indices: highlight functions already
+        // skipped to hl_start, so element 0 here corresponds to line hl_start.
+        .map(|(i, line)| (i + hl_start, line))
         .filter(|(line_idx, _)| {
             // If search is active with a query, only show matching lines
             if should_filter {
@@ -453,7 +468,6 @@ fn render_text_preview(
                 true
             }
         })
-        .skip(if should_filter { 0 } else { scroll_offset })
         .map(|(line_idx, mut line)| {
             // Determine if this line should be highlighted
             let should_highlight = is_focused && if visual_mode {
@@ -507,28 +521,32 @@ fn render_text_preview(
     frame.render_widget(paragraph, area);
 }
 
-fn highlight_text(content: &str, syntax: &syntect::parsing::SyntaxReference, config: &Config) -> Vec<Line<'static>> {
-    // Use the Tokyo Night Moon theme
+fn highlight_text(content: &str, syntax: &syntect::parsing::SyntaxReference, config: &Config, start: usize, count: usize, total_lines: usize) -> Vec<Line<'static>> {
     let mut highlighter = HighlightLines::new(syntax, &THEME);
-
-    // Count total lines for width calculation
-    let total_lines = content.lines().count();
     let line_num_width = format!("{}", total_lines).len();
+    let end = start + count;
 
-    let mut lines = Vec::new();
-    let mut line_number = 1;
+    let mut lines = Vec::with_capacity(count.min(total_lines.saturating_sub(start)));
 
-    for line in LinesWithEndings::from(content) {
+    for (line_idx, line) in LinesWithEndings::from(content).enumerate() {
+        if line_idx >= end {
+            break;
+        }
+        // highlight_line must be called on every line to keep the parser state correct,
+        // even for lines we won't render.
         let ranges = highlighter.highlight_line(line, &SYNTAX_SET).unwrap_or_default();
 
-        // Create line number span
+        if line_idx < start {
+            continue;
+        }
+
+        let line_number = line_idx + 1;
         let line_num_str = format!("{:>width$} │ ", line_number, width = line_num_width);
         let line_num_span = Span::styled(
             line_num_str,
             Style::default().fg(config.colors.text_secondary.to_ratatui_color())
         );
 
-        // Create content spans
         let content_spans: Vec<Span> = ranges
             .into_iter()
             .map(|(style, text)| {
@@ -537,25 +555,21 @@ fn highlight_text(content: &str, syntax: &syntect::parsing::SyntaxReference, con
             })
             .collect();
 
-        // Combine line number and content
         let mut all_spans = vec![line_num_span];
         all_spans.extend(content_spans);
-
         lines.push(Line::from(all_spans));
-        line_number += 1;
     }
 
     lines
 }
 
-fn plain_text_lines(content: &str, config: &Config) -> Vec<Line<'static>> {
-    let lines_vec: Vec<&str> = content.lines().collect();
-    let total_lines = lines_vec.len();
+fn plain_text_lines(content: &str, config: &Config, start: usize, count: usize, total_lines: usize) -> Vec<Line<'static>> {
     let line_num_width = format!("{}", total_lines).len();
 
-    lines_vec
-        .into_iter()
+    content.lines()
         .enumerate()
+        .skip(start)
+        .take(count)
         .map(|(idx, line)| {
             let line_number = idx + 1;
             let line_num_str = format!("{:>width$} │ ", line_number, width = line_num_width);
@@ -574,9 +588,7 @@ fn plain_text_lines(content: &str, config: &Config) -> Vec<Line<'static>> {
         .collect()
 }
 
-fn highlight_csv(content: &str, config: &Config) -> Vec<Line<'static>> {
-    let lines_vec: Vec<&str> = content.lines().collect();
-    let total_lines = lines_vec.len();
+fn highlight_csv(content: &str, config: &Config, start: usize, count: usize, total_lines: usize) -> Vec<Line<'static>> {
     let line_num_width = format!("{}", total_lines).len();
 
     // Define colors for different columns (cycle through these)
@@ -588,9 +600,10 @@ fn highlight_csv(content: &str, config: &Config) -> Vec<Line<'static>> {
         config.colors.file_icon_doc.to_ratatui_color(),     // Light blue
     ];
 
-    lines_vec
-        .into_iter()
+    content.lines()
         .enumerate()
+        .skip(start)
+        .take(count)
         .map(|(idx, line)| {
             let line_number = idx + 1;
             let line_num_str = format!("{:>width$} │ ", line_number, width = line_num_width);

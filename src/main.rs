@@ -233,15 +233,12 @@ async fn run_app(
     // Load initial preview in background
     spawn_preview_load(&mut app, &backend, &config, &preview_tx, &mut pending_preview_cancel);
 
+    // Initial render before entering the event loop
+    terminal.draw(|f| ui::render(f, &app, &config))?;
+
     // Main event loop
     loop {
-        // Render UI
-        terminal.draw(|f| ui::render(f, &app, &config))?;
-
-        // Check if should quit
-        if app.should_quit() {
-            break;
-        }
+        let mut dirty = false;
 
         // Clear expired status messages
         app.clear_status_if_expired(config.status_message_timeout_secs);
@@ -251,6 +248,7 @@ async fn run_app(
 
         // Process download progress messages
         while let Ok(msg) = progress_rx.try_recv() {
+            dirty = true;
             match msg {
                 ProgressMessage::Update { path, downloaded, total } => {
                     app.update_download(path, downloaded, total);
@@ -303,10 +301,12 @@ async fn run_app(
         // Process preview results from background tasks
         while let Ok((path, content)) = preview_rx.try_recv() {
             app.receive_preview(path, content);
+            dirty = true;
         }
 
         // Read events with timeout
         if let Some(event) = read_event(Duration::from_millis(100))? {
+            dirty = true;
             if let crossterm::event::Event::Key(key) = event {
                 let in_history_mode = app.mode() == &AppMode::History;
                 let in_visual_mode = app.mode() == &AppMode::Visual;
@@ -920,6 +920,15 @@ async fn run_app(
                         app.clear_pending_key();
                     }
                 }
+            }
+        }
+
+        // Only re-render when something actually changed
+        if dirty {
+            terminal.draw(|f| ui::render(f, &app, &config))?;
+
+            if app.should_quit() {
+                break;
             }
         }
     }
