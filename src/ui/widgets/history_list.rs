@@ -5,7 +5,7 @@ use crate::ui::text_utils::truncate_path;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState},
     Frame,
 };
@@ -18,7 +18,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
     let history = app.history();
     let filtered_indices = app.filtered_history();
     let selected_index = app.history_selected_index();
-    let search_query = app.search_query();
 
     // Determine border color based on focus
     let border_color = if is_focused {
@@ -63,21 +62,39 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
 
             // Truncate path if needed (history entries are already full display URIs)
             let display_path = truncate_path(path, max_path_width);
-            let name = format!(" {} {}", icon, display_path);
 
-            // Highlight matching text
+            // Adjust nucleo positions (which are for the full path) to the display_path.
+            // If truncated, display_path = ".../suffix": positions in the visible suffix are
+            // shifted by (path_chars - suffix_chars), then shifted back by the 4-char ".../" prefix.
             let highlight_color = config.colors.accent_search.to_ratatui_color();
             let base_style = Style::default().fg(color);
-            let name_spans = text_utils::highlight_matches(
-                &name,
-                search_query,
+            let raw_positions = app.history_match_positions_for(idx);
+            let positions: Vec<u32> = if display_path == *path {
+                raw_positions.to_vec()
+            } else {
+                // ".../suffix" — suffix_chars is display_path chars minus the 4-char prefix
+                let path_chars = path.chars().count() as u32;
+                let suffix_chars = display_path.chars().count() as u32 - 4;
+                let path_offset = path_chars - suffix_chars; // where suffix starts in path
+                const DISPLAY_PREFIX: u32 = 4; // ".../" is 4 chars
+                raw_positions.iter()
+                    .filter(|&&p| p >= path_offset)
+                    .map(|&p| p - path_offset + DISPLAY_PREFIX)
+                    .collect()
+            };
+
+            let mut spans = vec![
+                Span::styled(" ", base_style),
+                Span::styled(format!("{} ", icon), base_style),
+            ];
+            spans.extend(text_utils::highlight_positions(
+                &display_path,
+                &positions,
                 base_style,
                 highlight_color,
-            );
+            ));
 
-            let line = Line::from(name_spans);
-
-            ListItem::new(line)
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -99,7 +116,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
         .highlight_style(
             Style::default()
                 .bg(config.colors.selection_bg.to_ratatui_color())
-                .fg(config.colors.text_primary.to_ratatui_color())
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("❯ ");

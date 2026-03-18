@@ -131,7 +131,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
     let entries = app.entries();
     let filtered_indices = app.filtered_indices();
     let selected_index = app.selected_index();
-    let search_query = app.search_query();
 
     // Determine border color based on focus
     let border_color = if is_focused {
@@ -198,14 +197,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                 Color::Reset
             };
 
-            // Highlight matching text in file name
-            let name_with_icon = format!("{} {}", icon, entry.name);
+            // Highlight matched characters in the file name using nucleo positions.
+            // Icon and name are kept separate so positions (which are for the bare name) apply directly.
             let highlight_color = config.colors.accent_search.to_ratatui_color();
             let base_style = Style::default().fg(color).bg(bg);
+            let positions = app.match_positions_for(entry_idx);
 
-            let name_spans = text_utils::highlight_matches(
-                &name_with_icon,
-                search_query,
+            let icon_span = Span::styled(format!("{} ", icon), base_style);
+            let name_spans = text_utils::highlight_positions(
+                &entry.name,
+                positions,
                 base_style,
                 highlight_color,
             );
@@ -219,6 +220,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     Span::styled(selection_dot, Style::default()
                         .fg(Color::Rgb(100, 149, 237)) // Cornflower blue dot (darker blue)
                         .bg(bg)),
+                    icon_span,
                 ];
                 spans.extend(name_spans);
                 spans.push(Span::styled(size_info, Style::default()
@@ -231,6 +233,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
                     Span::styled(line_num_str, Style::default()
                         .fg(config.colors.text_secondary.to_ratatui_color())),
                     Span::raw(" "),
+                    icon_span,
                 ];
                 spans.extend(name_spans);
                 spans.push(Span::styled(size_info, Style::default()
@@ -279,7 +282,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, config: &Config, is_focu
         .highlight_style(
             Style::default()
                 .bg(config.colors.selection_bg.to_ratatui_color())
-                .fg(config.colors.text_primary.to_ratatui_color())
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("❯ ");

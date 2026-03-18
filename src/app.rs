@@ -72,6 +72,8 @@ pub struct App {
     entries: Vec<Entry>,
     /// Filtered entries (after fuzzy search)
     filtered_entries: Vec<usize>,
+    /// Matched char positions per entry index (for highlight rendering)
+    match_positions: HashMap<usize, Vec<u32>>,
     /// Currently selected index in filtered list
     selected_index: usize,
     /// Search query
@@ -96,6 +98,8 @@ pub struct App {
     history: Vec<String>,
     /// Filtered history indices (after fuzzy search)
     filtered_history: Vec<usize>,
+    /// Matched char positions per history index (for highlight rendering)
+    history_match_positions: HashMap<usize, Vec<u32>>,
     /// Selected index in history mode
     history_selected_index: usize,
     /// Whether we're searching within history (vs searching files)
@@ -144,6 +148,7 @@ impl App {
             current_prefix: initial_prefix,
             entries: Vec::new(),
             filtered_entries: Vec::new(),
+            match_positions: HashMap::new(),
             selected_index: 0,
             search_query: String::new(),
             mode: AppMode::Normal,
@@ -156,6 +161,7 @@ impl App {
             pending_key_instant: None,
             history: Vec::new(),
             filtered_history: Vec::new(),
+            history_match_positions: HashMap::new(),
             history_selected_index: 0,
             searching_history: false,
             wrap_text: false,
@@ -315,12 +321,24 @@ impl App {
     /// Apply fuzzy filter to entries
     fn apply_filter(&mut self) {
         let entry_names: Vec<String> = self.entries.iter().map(|e| e.name.clone()).collect();
-        self.filtered_entries = self.fuzzy_matcher.match_entries(&entry_names, &self.search_query);
+        let results = self.fuzzy_matcher.match_entries(&entry_names, &self.search_query);
+        self.match_positions = results.iter().map(|(idx, pos)| (*idx, pos.clone())).collect();
+        self.filtered_entries = results.into_iter().map(|(idx, _)| idx).collect();
 
         // Reset selection if out of bounds
         if self.selected_index >= self.filtered_entries.len() {
             self.selected_index = 0;
         }
+    }
+
+    /// Get matched char positions for an entry index (for highlight rendering)
+    pub fn match_positions_for(&self, entry_idx: usize) -> &[u32] {
+        self.match_positions.get(&entry_idx).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Get matched char positions for a history entry index (for highlight rendering)
+    pub fn history_match_positions_for(&self, history_idx: usize) -> &[u32] {
+        self.history_match_positions.get(&history_idx).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// Move selection up
@@ -416,7 +434,9 @@ impl App {
 
     /// Apply fuzzy filter to history entries
     fn apply_history_filter(&mut self) {
-        self.filtered_history = self.fuzzy_matcher.match_entries(&self.history, &self.search_query);
+        let results = self.fuzzy_matcher.match_entries(&self.history, &self.search_query);
+        self.history_match_positions = results.iter().map(|(idx, pos)| (*idx, pos.clone())).collect();
+        self.filtered_history = results.into_iter().map(|(idx, _)| idx).collect();
 
         // Reset selection if out of bounds
         if self.history_selected_index >= self.filtered_history.len() {
