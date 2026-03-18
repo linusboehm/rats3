@@ -311,7 +311,7 @@ async fn run_app(
                     let path_owned = path.clone();
                     let line_num_color = config.colors.text_secondary.to_ratatui_color();
                     let tx = highlight_tx.clone();
-                    tokio::task::spawn_blocking(move || {
+                    std::thread::spawn(move || {
                         let lines = ui::widgets::preview::build_highlight_lines(
                             &text_owned,
                             syntax,
@@ -337,6 +337,17 @@ async fn run_app(
             dirty = true;
         }
 
+        // Flush pending key in search mode if timeout expired (~300ms)
+        if app.is_search_mode() {
+            if let Some(c) = app.pending_key() {
+                if app.pending_key_elapsed().map(|d| d.as_millis() > 300).unwrap_or(false) {
+                    app.clear_pending_key();
+                    app.append_search_char(c);
+                    dirty = true;
+                }
+            }
+        }
+
         // Read events with timeout
         if let Some(event) = read_event(Duration::from_millis(100))? {
             dirty = true;
@@ -347,6 +358,8 @@ async fn run_app(
                 let preview_focused = matches!(app.focused_panel(), rats3::app::FocusedPanel::Preview);
                 let preview_visual_mode = app.is_preview_visual_mode();
                 let preview_search_mode = app.is_preview_search_active();
+                let was_search_mode = app.is_search_mode();
+                let pending_before = app.pending_key();
 
                 // Check if Escape is pressed while downloads are active (not in a modal mode)
                 let action = if matches!(key.code, crossterm::event::KeyCode::Esc)
@@ -610,6 +623,14 @@ async fn run_app(
                     }
                     Action::AppendChar(c) => {
                         app.clear_pending_key();
+                        // If a pending key was set and the sequence was broken (e.g. 'j' then 'k'
+                        // with 'jj' as exit sequence), flush the pending char first so both chars
+                        // appear in the search query in the correct order.
+                        if was_search_mode {
+                            if let Some(pending_char) = pending_before {
+                                app.append_search_char(pending_char);
+                            }
+                        }
                         if app.is_preview_search_active() {
                             app.append_preview_search_char(c);
                         } else {

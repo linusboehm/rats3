@@ -90,6 +90,8 @@ pub struct App {
     current_preview_path: Option<String>,
     /// Pending key for multi-key sequences (e.g., waiting for second 'g' in 'gg')
     pending_key: Option<char>,
+    /// When the pending key was set (for timeout)
+    pending_key_instant: Option<std::time::Instant>,
     /// History of visited paths (most recent first)
     history: Vec<String>,
     /// Filtered history indices (after fuzzy search)
@@ -151,6 +153,7 @@ impl App {
             preview_cache: HashMap::new(),
             current_preview_path: None,
             pending_key: None,
+            pending_key_instant: None,
             history: Vec::new(),
             filtered_history: Vec::new(),
             history_selected_index: 0,
@@ -360,6 +363,7 @@ impl App {
     /// Set pending key for multi-key sequences
     pub fn set_pending_key(&mut self, key: char) {
         self.pending_key = Some(key);
+        self.pending_key_instant = Some(std::time::Instant::now());
     }
 
     /// Get pending key
@@ -370,6 +374,12 @@ impl App {
     /// Clear pending key
     pub fn clear_pending_key(&mut self) {
         self.pending_key = None;
+        self.pending_key_instant = None;
+    }
+
+    /// How long the pending key has been waiting
+    pub fn pending_key_elapsed(&self) -> Option<std::time::Duration> {
+        self.pending_key_instant.map(|t| t.elapsed())
     }
 
     /// Add path to history (most recent first, avoid duplicates)
